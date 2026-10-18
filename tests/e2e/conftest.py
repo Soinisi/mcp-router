@@ -73,6 +73,10 @@ class LLMRun:
     tickets: list[dict]
 
     @property
+    def final_answer(self) -> str:
+        return _final_answer(self.events)
+
+    @property
     def router_calls(self) -> list[RouterCall]:
         calls: list[RouterCall] = []
         for block, event in enumerate(self.events):
@@ -147,6 +151,18 @@ def _final_text(events: list[dict[str, Any]]) -> str:
         event["part"].get("text", "")
         for event in events
         if event.get("type") == "text"
+    )
+
+
+def _final_answer(events: list[dict[str, Any]]) -> str:
+    last_tool = max(
+        (index for index, event in enumerate(events) if event.get("type") == "tool_use"),
+        default=-1,
+    )
+    return "\n".join(
+        event["part"].get("text", "")
+        for index, event in enumerate(events)
+        if index > last_tool and event.get("type") == "text"
     )
 
 
