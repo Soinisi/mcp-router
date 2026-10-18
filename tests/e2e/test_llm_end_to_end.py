@@ -116,21 +116,59 @@ _LEARN_CASES = {
 }
 
 
+def _tool_names(payload) -> set[str] | None:
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError:
+            return None
+    if isinstance(payload, list):
+        return {
+            item["name"]
+            for item in payload
+            if isinstance(item, dict) and isinstance(item.get("name"), str)
+        }
+    if isinstance(payload, dict):
+        if isinstance(payload.get("tools"), list):
+            return _tool_names(payload["tools"])
+        content = payload.get("content")
+        if isinstance(content, list):
+            names: set[str] = set()
+            found = False
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                parsed = _tool_names(item.get("text"))
+                if parsed is not None:
+                    found = True
+                    names |= parsed
+            return names if found else None
+    return None
+
+
 def _parse_names(call) -> set[str] | None:
     output = call.own_output
     if output is None:
         return None
-    try:
-        payload = json.loads(output)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(payload, list):
-        return None
-    return {
-        item["name"]
-        for item in payload
-        if isinstance(item, dict) and isinstance(item.get("name"), str)
-    }
+    return _tool_names(output)
+
+
+def _assert_open_ticket_count(text: str, count: int) -> None:
+    assert re.search(rf"\b{count}\b", text), text
+    lowered = text.lower()
+    assert re.search(
+        r"\bopen\b[^.\n]{0,30}\btickets?\b|\btickets?\b[^.\n]{0,30}\bopen\b",
+        lowered,
+    ), text
+
+
+def _assert_status_mentioned(text: str, status: str) -> None:
+    lowered = text.lower()
+    assert re.search(
+        rf"\bstatus\b[^.\n]{{0,40}}\b{status}\b"
+        rf"|\b(?:is|currently)\b[^.\n]{{0,20}}\b{status}\b",
+        lowered,
+    ), text
 
 
 def _assert_all_servers_were_discovered(run) -> None:
@@ -138,9 +176,11 @@ def _assert_all_servers_were_discovered(run) -> None:
     assert installed, "get_installed_mcps did not succeed"
     listings: list[set[str]] = []
     for call in installed:
+        if call.own_output is None:
+            continue
         parsed = _parse_names(call)
-        if parsed is not None:
-            listings.append(parsed)
+        assert parsed is not None, call.own_output
+        listings.append(parsed)
     assert listings, (
         "no get_installed_mcps result could be attributed to a single call"
     )
@@ -161,9 +201,10 @@ def _assert_tool_listing(run, server: str, expected_tools: set[str]):
     names: set[str] = set()
     attributable = False
     for call in succeeded:
-        parsed = _parse_names(call)
-        if parsed is None:
+        if call.own_output is None:
             continue
+        parsed = _parse_names(call)
+        assert parsed is not None, call.own_output
         attributable = True
         names |= parsed
     if attributable:
@@ -193,14 +234,15 @@ def test_create_then_look_up_ticket(run_llm):
     ticket = tickets[0]
     assert "refund" in f"{ticket['subject']} {ticket['body']}".lower()
     assert ticket["id"] in run.final_text
-    assert ticket["status"] in run.final_text.lower()
+    _assert_status_mentioned(run.final_text, ticket["status"])
 
 
 def test_close_ticket(run_llm):
     run = run_llm("Close ticket TCK-0001 for Acme Corp.", seed=_ACME_SEED)
 
-    tickets = {ticket["id"]: ticket for ticket in run.tickets}
-    assert tickets["TCK-0001"]["status"] == "closed"
+    expected = [dict(ticket) for ticket in _ACME_SEED]
+    expected[0]["status"] = "closed"
+    assert run.tickets == expected
     assert "tck-0001" in run.final_text.lower()
 
 
@@ -210,7 +252,7 @@ def test_count_open_tickets(run_llm):
         seed=_ACME_SEED,
     )
 
-    assert "2" in run.final_text, run.final_text
+    _assert_open_ticket_count(run.final_text, 2)
     assert "acme" in run.final_text.lower(), run.final_text
 
 
