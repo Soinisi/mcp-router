@@ -3,7 +3,7 @@
 These are excluded from the default suite (see ``addopts`` in pyproject.toml).
 Run them with:
 
-    E2E_MODEL=openai/gpt-6-luna uv run pytest -m e2e
+    uv run pytest -m e2e --e2e-model openai/gpt-6-luna
 """
 
 from __future__ import annotations
@@ -47,7 +47,8 @@ _LEARN_CASES = {
             "docs-search or fetch tools."
         ),
         "tool": "microsoft_code_sample_search",
-        "check_arg": lambda call: bool(call.arg("query")),
+        "check_arg": lambda call: "http client" in (call.arg("query") or "").lower()
+        and (call.arg("language") or "").lower() == "python",
     },
     "docs-fetch": {
         "prompt": (
@@ -93,6 +94,10 @@ def test_local_and_remote_through_one_router(run_llm):
     assert run.nonce in run.final_text
     assert "GOODBYE_SENTINEL" not in run.final_text
     assert "learn.microsoft.com" in run.final_text
+
+    routed = run.calls_to("run_mcp_tool")
+    assert all("GOODBYE_SENTINEL" not in call.output for call in routed)
+    assert all(call.arg("mcp_tool") != "goodbye" for call in routed)
 
 
 @pytest.mark.parametrize("case", _LEARN_CASES.values(), ids=list(_LEARN_CASES))
