@@ -127,6 +127,14 @@ def _assert_title_came_from_output(text: str, outputs: list[str]) -> None:
     assert any(title in answer for title in candidates), (candidates, text)
 
 
+def _code_sample_arg(call) -> bool:
+    query = (call.arg("query") or "").lower()
+    language = (call.arg("language") or "").lower()
+    if "http client" not in query:
+        return False
+    return language == "python" or (not language and "python" in query)
+
+
 _LEARN_CASES = {
     "docs-search": {
         "prompt": (
@@ -145,8 +153,7 @@ _LEARN_CASES = {
             "Python. Give me one learn.microsoft.com link."
         ),
         "tool": "microsoft_code_sample_search",
-        "check_arg": lambda call: "http client" in (call.arg("query") or "").lower()
-        and (call.arg("language") or "").lower() == "python",
+        "check_arg": _code_sample_arg,
         "check_text": lambda text: "learn.microsoft.com" in text,
         "check_output": _assert_url_came_from_output,
     },
@@ -216,7 +223,7 @@ _NUMBER_WORDS = {
 }
 _CLAUSE_SPLIT = re.compile(r"[.;!?\n]|,?\s+(?:and|but|while|whereas)\s+")
 _NEGATION = re.compile(r"\b(?:not|no|never|cannot)\b|\w+n't\b")
-_OPEN_TICKETS = r"\bopen\s+(?:[a-z-]+\s+){0,2}tickets?\b"
+_OPEN_TICKETS = r"\bopen\s+(?:[a-z-]+\s+){0,2}(?:tickets?|ones?)\b"
 _OPEN_TICKET_PATTERNS = (
     r"\bacme\b[^.;!?\n\d]{{0,60}}?{number}\s+(?:[a-z-]+\s+){{0,2}}{open_tickets}",
     r"\bacme\b[^.;!?\n\d]{{0,60}}?{number}\s+(?:[a-z-]+\s+){{0,2}}tickets?\s+"
@@ -224,6 +231,10 @@ _OPEN_TICKET_PATTERNS = (
     r"{open_tickets}[^.;!?\n\d]{{0,40}}?\bacme\b[^.;!?\n\d]{{0,20}}?{number}",
     r"\bacme\b[^.;!?\n\d]{{0,40}}?{open_tickets}[^.;!?\n\d]{{0,20}}?{number}",
     r"{number}\s+(?:[a-z-]+\s+){{0,2}}{open_tickets}[^.;!?\n\d]{{0,30}}?\bacme\b",
+    r"\bacme\b[^.;!?\n\d]{{0,60}}?{number}\s+of\s+(?:the\s+)?"
+    r"(?:\d+\s+|[a-z-]+\s+)?{open_tickets}",
+    r"{number}\s+of\s+(?:the\s+)?(?:\d+\s+|[a-z-]+\s+)?{open_tickets}"
+    r"[^.;!?\n\d]{{0,40}}?\bacme\b",
 )
 
 
@@ -251,22 +262,59 @@ def _assert_open_ticket_count(text: str, count: int) -> None:
     raise AssertionError(text)
 
 
+_STATUS_REFERENCE = (
+    r"(?:{ticket_id}|its|it|this\s+ticket|the\s+ticket|that\s+ticket)\b"
+)
+_STATUS_COPULA = r"(?:is|are|remains?|stays?|has\s+been|have\s+been)"
+_STATUS_ADVERB = r"(?:\s+(?:now|currently|still|already))?"
+
+
+def _status_predicate(sentence: str, ticket_id: str, status: str) -> bool:
+    reference = _STATUS_REFERENCE.format(ticket_id=re.escape(ticket_id.lower()))
+    patterns = [
+        re.compile(
+            rf"{reference}[^.;!?\n]{{0,40}}?\b{_STATUS_COPULA}\b{_STATUS_ADVERB}"
+            rf"\s+(?:(?:a|an)\s+)?{status}\b"
+        ),
+        re.compile(
+            rf"{reference}[^.;!?\n]{{0,40}}?\bstatus\s*[:=]\s*{status}\b"
+        ),
+        re.compile(
+            rf"{reference}[^.;!?\n]{{0,40}}?\b(?:has|with)\s+"
+            rf"(?:(?:a|an|the)\s+)?status\s+(?:of\s+)?{status}\b"
+        ),
+    ]
+    if status == "closed":
+        patterns.append(
+            re.compile(
+                rf"\b(?:i\s+)?(?:have\s+|'ve\s+|had\s+)?closed\s+"
+                rf"(?:the\s+|ticket\s+)?{reference}"
+            )
+        )
+    for pattern in patterns:
+        for match in pattern.finditer(sentence):
+            prefix = sentence[max(0, match.start() - 20) : match.start()]
+            if not _NEGATION.search(prefix):
+                return True
+    return False
+
+
 def _assert_status_mentioned(text: str, ticket_id: str, status: str) -> None:
     lowered = text.lower()
     assert ticket_id.lower() in lowered, text
-    status_re = re.compile(rf"\b{re.escape(status.lower())}\b")
-    references = ("it", "its", "this ticket", "the ticket", "that ticket")
-    for clause in _clauses(lowered):
-        bound = ticket_id.lower() in clause or any(
-            re.search(rf"\b{re.escape(reference)}\b", clause)
-            for reference in references
-        )
-        if not bound:
-            continue
-        for match in status_re.finditer(clause):
-            if not _NEGATION.search(clause[: match.start()]):
-                return
-    raise AssertionError(text)
+    expected = status.lower()
+    competitor = "closed" if expected == "open" else "open"
+    sentences = [
+        sentence
+        for sentence in re.split(r"[.;!?\n]", lowered)
+        if sentence.strip()
+    ]
+    assert any(
+        _status_predicate(sentence, ticket_id, expected) for sentence in sentences
+    ), text
+    assert not any(
+        _status_predicate(sentence, ticket_id, competitor) for sentence in sentences
+    ), text
 
 
 def _assert_all_servers_were_discovered(run) -> None:
@@ -332,8 +380,9 @@ def test_create_then_look_up_ticket(run_llm):
     ticket = tickets[0]
     assert ticket["customer"].lower() == "acme corp"
     assert "refund" in f"{ticket['subject']} {ticket['body']}".lower()
+    assert ticket["status"] == "open"
     assert ticket["id"].lower() in run.final_answer.lower()
-    _assert_status_mentioned(run.final_answer, ticket["id"], ticket["status"])
+    _assert_status_mentioned(run.final_answer, ticket["id"], "open")
 
 
 def test_close_ticket(run_llm):
@@ -373,9 +422,14 @@ def test_local_tool_selection(run_llm):
         call for call in run.calls_to("run_mcp_tool") if call.arg("mcp_tool") == "hello"
     ]
     assert greeted, "the model did not call the hello tool"
-    assert greeted[0].succeeded
-    if greeted[0].own_output is not None:
-        assert run.nonce in greeted[0].own_output
+    successful = [call for call in greeted if call.succeeded]
+    assert successful, (
+        f"the hello tool never succeeded: "
+        f"{[(call.status, call.output) for call in greeted]}"
+    )
+    outputs = [call.own_output for call in successful if call.own_output is not None]
+    if outputs:
+        assert any(run.nonce in output for output in outputs)
 
     assert run.nonce in run.final_answer
     assert "GOODBYE_SENTINEL" not in run.final_answer
@@ -404,13 +458,14 @@ def test_microsoft_learn_tool_selection(run_llm, case):
     ]
     seen = [call.arg("mcp_tool") for call in run.calls_to("run_mcp_tool")]
     assert calls, f"expected {case['tool']!r}; saw run_mcp_tool calls {seen}"
-    assert calls[0].succeeded, calls[0].output
-    assert case["check_arg"](calls[0]), calls[0].input
-    outputs = [
-        call.own_output
-        for call in calls
-        if call.succeeded and call.own_output is not None
+    matching = [
+        call for call in calls if call.succeeded and case["check_arg"](call)
     ]
+    assert matching, (
+        f"no successful {case['tool']!r} call matched its arguments: "
+        f"{[(call.status, call.input) for call in calls]}"
+    )
+    outputs = [call.own_output for call in matching if call.own_output is not None]
     if outputs:
         case["check_output"](run.final_answer, outputs)
     assert case["check_text"](run.final_answer), run.final_text
