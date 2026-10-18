@@ -13,10 +13,32 @@ Run them with:
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 
 pytestmark = pytest.mark.e2e
+
+_LEARN_URL = re.compile(r"https?://[^\s<>()\"']+")
+
+
+def _final_learn_urls(text: str) -> list[str]:
+    urls = [match.rstrip(".,;:!?") for match in _LEARN_URL.findall(text)]
+    return [url for url in urls if "learn.microsoft.com" in url.lower()]
+
+
+def _assert_url_came_from_output(text: str, outputs: list[str]) -> None:
+    urls = _final_learn_urls(text)
+    assert urls, text
+    assert any(
+        url.lower() in output.lower() for url in urls for output in outputs
+    ), (urls, outputs)
+
+
+def _assert_jsonserializer_came_from_output(text: str, outputs: list[str]) -> None:
+    assert "jsonserializer" in text.lower(), text
+    assert any("jsonserializer" in output.lower() for output in outputs), outputs
+
 
 _LEARN_CASES = {
     "docs-search": {
@@ -29,6 +51,7 @@ _LEARN_CASES = {
         "check_arg": lambda call: "model context protocol"
         in (call.arg("query") or "").lower(),
         "check_text": lambda text: "learn.microsoft.com" in text,
+        "check_output": _assert_url_came_from_output,
     },
     "code-sample": {
         "prompt": (
@@ -39,6 +62,7 @@ _LEARN_CASES = {
         "check_arg": lambda call: "http client" in (call.arg("query") or "").lower()
         and (call.arg("language") or "").lower() == "python",
         "check_text": lambda text: "learn.microsoft.com" in text,
+        "check_output": _assert_url_came_from_output,
     },
     "docs-fetch": {
         "prompt": (
@@ -50,6 +74,7 @@ _LEARN_CASES = {
         "check_arg": lambda call: "jsonserializer"
         in (call.arg("url") or "").lower(),
         "check_text": lambda text: "jsonserializer" in text.lower(),
+        "check_output": _assert_jsonserializer_came_from_output,
     },
 }
 
@@ -74,18 +99,16 @@ def _parse_names(call) -> set[str] | None:
 def _assert_both_servers_were_discovered(run) -> None:
     installed = [call for call in run.calls_to("get_installed_mcps") if call.succeeded]
     assert installed, "get_installed_mcps did not succeed"
-    names: set[str] = set()
-    verified = False
+    listings: list[set[str]] = []
     for call in installed:
-        if call.arg("regex_filter"):
-            continue
         parsed = _parse_names(call)
-        if parsed is None:
-            continue
-        verified = True
-        names |= parsed
-    if verified:
-        assert {"hello", "microsoftdocs"} <= names, names
+        if parsed is not None:
+            listings.append(parsed)
+    assert listings, (
+        "no get_installed_mcps result could be attributed to a single call"
+    )
+    names = set().union(*listings)
+    assert {"hello", "microsoftdocs"} <= names, names
 
 
 def _assert_tool_listing(run, server: str, expected_tools: set[str]):
@@ -98,14 +121,16 @@ def _assert_tool_listing(run, server: str, expected_tools: set[str]):
         f"get_mcp_tools({server!r}) did not succeed: "
         f"{[(call.block, call.status) for call in listed]}"
     )
-    listing = next(
-        (call for call in succeeded if call.own_output is not None), succeeded[0]
-    )
-    if listing.own_output is not None:
-        names = _parse_names(listing)
-        assert names is not None, listing.own_output
-        assert expected_tools <= names, (expected_tools, listing.own_output)
-    return listing
+    names: set[str] = set()
+    attributable = False
+    for call in succeeded:
+        parsed = _parse_names(call)
+        if parsed is None:
+            continue
+        attributable = True
+        names |= parsed
+    if attributable:
+        assert expected_tools <= names, (expected_tools, names)
 
 
 def test_local_tool_selection(run_llm):
@@ -154,4 +179,11 @@ def test_microsoft_learn_tool_selection(run_llm, case):
     assert calls, f"expected {case['tool']!r}; saw run_mcp_tool calls {seen}"
     assert calls[0].succeeded, calls[0].output
     assert case["check_arg"](calls[0]), calls[0].input
+    outputs = [
+        call.own_output
+        for call in calls
+        if call.succeeded and call.own_output is not None
+    ]
+    if outputs:
+        case["check_output"](run.final_text, outputs)
     assert case["check_text"](run.final_text), run.final_text

@@ -6,7 +6,8 @@ and a local hello-world server. Assertions read opencode's JSON event stream.
 
 The child opencode process must be isolated from the session that launched the
 tests: besides a fresh cwd, ``PWD`` is rewritten (opencode resolves its project
-from it) and the inherited ``OPENCODE_SESSION_ID`` is dropped.
+from it), a fresh ``XDG_CONFIG_HOME`` drops inherited global config, and the
+inherited ``OPENCODE_SESSION_ID`` is dropped.
 """
 
 from __future__ import annotations
@@ -259,6 +260,9 @@ def _run_in(
     env = {k: v for k, v in os.environ.items() if k != "OPENCODE_SESSION_ID"}
     # opencode resolves its workspace from PWD, which subprocess cwd does not update.
     env["PWD"] = str(project)
+    config_home = run_dir / "config"
+    config_home.mkdir()
+    env["XDG_CONFIG_HOME"] = str(config_home)
     timeout = int(os.environ.get("E2E_TIMEOUT", "300"))
     try:
         proc = subprocess.run(
