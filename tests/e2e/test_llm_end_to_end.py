@@ -70,7 +70,9 @@ def test_local_and_remote_through_one_router(run_llm):
     assert installed, "get_installed_mcps was not called"
     assert "hello" in installed[0].output and "microsoftdocs" in installed[0].output
 
-    listed = [call for call in run.calls_to("get_mcp_tools") if "hello" in call.code]
+    listed = [
+        call for call in run.calls_to("get_mcp_tools") if call.arg("mcp_name") == "hello"
+    ]
     assert listed, "get_mcp_tools('hello') was not called"
     names = set(re.findall(r'"name":\s*"([^"]+)"', listed[0].output))
     assert {"hello", "goodbye", "echo"} <= names
