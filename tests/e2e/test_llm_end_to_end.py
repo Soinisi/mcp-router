@@ -45,25 +45,29 @@ _LEARN_CASES = {
             "title it displays."
         ),
         "tool": "microsoft_docs_fetch",
-        "check_arg": lambda call: "learn.microsoft.com" in (call.arg("url") or ""),
+        "check_arg": lambda call: "jsonserializer"
+        in (call.arg("url") or "").lower(),
         "check_text": lambda text: "jsonserializer" in text.lower(),
     },
 }
 
 
 def _assert_both_servers_were_discovered(run) -> None:
-    installed = run.calls_to("get_installed_mcps")
-    assert installed, "get_installed_mcps was not called"
+    installed = [call for call in run.calls_to("get_installed_mcps") if call.succeeded]
+    assert installed, "get_installed_mcps did not succeed"
     listing = "\n".join(call.output for call in installed)
     assert "hello" in listing and "microsoftdocs" in listing
 
 
-def _assert_tool_listing(run, server: str):
+def _assert_tool_listing(run, server: str, expected_tool: str):
     listed = [
         call for call in run.calls_to("get_mcp_tools") if call.arg("mcp_name") == server
     ]
     assert listed, f"get_mcp_tools({server!r}) was not called"
-    return listed[0]
+    listing = listed[0]
+    assert listing.succeeded, listing.output
+    assert expected_tool in listing.output, listing.output
+    return listing
 
 
 def test_local_tool_selection(run_llm):
@@ -73,7 +77,7 @@ def test_local_tool_selection(run_llm):
     )
 
     _assert_both_servers_were_discovered(run)
-    _assert_tool_listing(run, "hello")
+    _assert_tool_listing(run, "hello", "hello")
 
     greeted = [
         call for call in run.calls_to("run_mcp_tool") if call.arg("mcp_tool") == "hello"
@@ -95,7 +99,7 @@ def test_microsoft_learn_tool_selection(run_llm, case):
     run = run_llm(case["prompt"])
 
     _assert_both_servers_were_discovered(run)
-    _assert_tool_listing(run, "microsoftdocs")
+    _assert_tool_listing(run, "microsoftdocs", case["tool"])
 
     calls = [
         call
