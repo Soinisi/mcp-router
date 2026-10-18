@@ -54,8 +54,9 @@ tools for all other ("registered") servers behind it. See `CONTEXT.md`
   interpreter, so run tests via `uv run pytest`.
 - `e2e` tests are excluded from the default suite. Run them with
   `uv run pytest -m e2e --e2e-model openai/gpt-6-luna`; they drive `opencode`
-  against a temp project, the keyless Microsoft Learn MCP (network), and
-  `tests/e2e/hello_server.py`.
+  against a temp project with three servers: Microsoft Learn (network),
+  `tests/e2e/hello_server.py`, and `tests/e2e/ticket_server.py`. Prompts are plain
+  user goals; the ticket tests assert the server's JSON store.
 
 ## Agent skills
 

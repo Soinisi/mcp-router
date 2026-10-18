@@ -23,7 +23,8 @@ from .sessions import DEFAULT_TIMEOUT, SessionManager
 
 _INSTRUCTIONS = (
     "This is an MCP router. You are connected to one server that fronts many "
-    "others. Discover tools at runtime:\n"
+    "others. Always use the router's tools to answer; do not answer from your "
+    "own knowledge and never invent tool output. Discover tools at runtime:\n"
     "  1. get_installed_mcps -> the servers available to you.\n"
     "  2. get_mcp_tools(mcp_name) -> the tools one server exposes.\n"
     "  3. run_mcp_tool(mcp_name, mcp_tool, arguments) -> invoke one of them."

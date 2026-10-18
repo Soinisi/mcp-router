@@ -27,7 +27,10 @@ import pytest
 import yaml
 
 HELLO_SERVER = Path(__file__).with_name("hello_server.py")
+TICKET_SERVER = Path(__file__).with_name("ticket_server.py")
 LEARN_URL = "https://learn.microsoft.com/api/mcp"
+
+TICKET_TOOLS = {"create_ticket", "get_ticket", "list_tickets", "close_ticket"}
 
 
 @dataclass
@@ -65,6 +68,7 @@ class LLMRun:
     nonce: str
     final_text: str
     events: list[dict[str, Any]]
+    tickets: list[dict]
 
     @property
     def router_calls(self) -> list[RouterCall]:
@@ -145,7 +149,11 @@ def e2e_model(pytestconfig: pytest.Config, opencode_exe: str) -> str:
 
 @pytest.fixture()
 def run_llm(opencode_exe: str, e2e_model: str) -> Callable[..., LLMRun]:
-    def _run(prompt: str, attempts: int = 2) -> LLMRun:
+    def _run(
+        prompt: str,
+        seed: list[dict] | None = None,
+        attempts: int = 2,
+    ) -> LLMRun:
         """Run the prompt, retrying only if the model ignored the router entirely.
 
         Tool selection itself is not retried: a model that engages the router
@@ -155,7 +163,7 @@ def run_llm(opencode_exe: str, e2e_model: str) -> Callable[..., LLMRun]:
         for _ in range(attempts):
             run_dir = Path(tempfile.mkdtemp(prefix="mcp-router-e2e-"))
             try:
-                last = _run_in(run_dir, prompt, opencode_exe, e2e_model)
+                last = _run_in(run_dir, prompt, opencode_exe, e2e_model, seed)
             finally:
                 if not os.environ.get("E2E_KEEP_TMP"):
                     shutil.rmtree(run_dir, ignore_errors=True)
@@ -168,9 +176,15 @@ def run_llm(opencode_exe: str, e2e_model: str) -> Callable[..., LLMRun]:
 
 
 def _run_in(
-    run_dir: Path, prompt: str, opencode_exe: str, e2e_model: str
+    run_dir: Path,
+    prompt: str,
+    opencode_exe: str,
+    e2e_model: str,
+    seed: list[dict] | None = None,
 ) -> LLMRun:
     nonce = secrets.token_hex(8)
+    ticket_store = run_dir / "tickets.json"
+    ticket_store.write_text(json.dumps(seed or [], indent=2), encoding="utf-8")
     router_config = run_dir / "router.yaml"
     router_config.write_text(
         yaml.safe_dump(
@@ -190,6 +204,16 @@ def _run_in(
                         "env": {"HELLO_NONCE": nonce},
                         "description": "Local hello-world test server",
                     },
+                    "tickets": {
+                        "type": "local",
+                        "command": sys.executable,
+                        "args": [str(TICKET_SERVER)],
+                        "env": {"TICKET_STORE": str(ticket_store)},
+                        "description": (
+                            "Customer support tickets: create, look up, list, "
+                            "and close tickets."
+                        ),
+                    },
                 },
             }
         ),
@@ -198,12 +222,6 @@ def _run_in(
 
     project = run_dir / "project"
     project.mkdir()
-    (project / "AGENTS.md").write_text(
-        "Use the available tools to perform every task. Never answer from your "
-        "own knowledge and never invent tool output. When a task names a URL or "
-        "asks about a page, retrieve it with a tool instead of relying on memory.\n",
-        encoding="utf-8",
-    )
     (project / "opencode.json").write_text(
         json.dumps(
             {
@@ -294,4 +312,14 @@ def _run_in(
         )
 
     events = _parse_events(proc.stdout)
-    return LLMRun(nonce=nonce, final_text=_final_text(events), events=events)
+    tickets = (
+        json.loads(ticket_store.read_text(encoding="utf-8"))
+        if ticket_store.exists()
+        else []
+    )
+    return LLMRun(
+        nonce=nonce,
+        final_text=_final_text(events),
+        events=events,
+        tickets=tickets,
+    )
