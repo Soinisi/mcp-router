@@ -15,6 +15,8 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator, Awaitable, Callable
 
+import httpx
+
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
@@ -56,8 +58,23 @@ async def _connect(server: Server) -> AsyncIterator[tuple[Any, Any]]:
 
     from mcp.client.streamable_http import streamable_http_client
 
-    async with streamable_http_client(server.url, headers=headers) as (read, write, _):
-        yield read, write
+    # mcp 1.30's streamable_http_client has no ``headers`` argument: headers
+    # must be carried by an httpx client.
+    if headers:
+        # Match the MCP transports' defaults: 30s connect/write/pool, 300s read.
+        # Redirects are left to the transport, which follows them within origin.
+        async with httpx.AsyncClient(
+            headers=headers, timeout=httpx.Timeout(30.0, read=300.0)
+        ) as client:
+            async with streamable_http_client(server.url, http_client=client) as (
+                read,
+                write,
+                _,
+            ):
+                yield read, write
+    else:
+        async with streamable_http_client(server.url) as (read, write, _):
+            yield read, write
 
 
 class ServerSession:
