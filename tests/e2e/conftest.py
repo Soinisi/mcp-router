@@ -1,8 +1,9 @@
 """Fixtures for the LLM-driven end-to-end tests.
 
 The harness runs a real agent (opencode) whose only MCP server is `mcp-router`.
-The router is configured with two children: Microsoft Learn (remote, keyless)
-and a local hello-world server. Assertions read opencode's JSON event stream.
+The router is configured with three children: Microsoft Learn (remote, keyless),
+a local hello-world server, and a local ticket server. Assertions read
+opencode's JSON event stream.
 
 The child opencode process must be isolated from the session that launched the
 tests: besides a fresh cwd, ``PWD`` is rewritten (opencode resolves its project
@@ -31,6 +32,7 @@ TICKET_SERVER = Path(__file__).with_name("ticket_server.py")
 LEARN_URL = "https://learn.microsoft.com/api/mcp"
 
 TICKET_TOOLS = {"create_ticket", "get_ticket", "list_tickets", "close_ticket"}
+DIRECT_NETWORK_TOOLS = frozenset({"fetch", "webfetch", "websearch"})
 
 
 @dataclass
@@ -88,21 +90,44 @@ class LLMRun:
             structured = (
                 (state.get("metadata") or {}).get("metadata") or {}
             ).get("toolCalls") or []
-            block_size = len(structured)
-            for call in structured:
-                tool = call.get("tool", "")
-                if tool.startswith("mcp-router."):
-                    calls.append(
-                        RouterCall(
-                            tool=tool.split(".", 1)[1],
-                            input=call.get("input") or {},
-                            status=str(call.get("status") or ""),
-                            output=output,
-                            block=block,
-                            block_size=block_size,
-                        )
+            routed = [
+                call
+                for call in structured
+                if str(call.get("tool", "")).startswith("mcp-router.")
+            ]
+            block_size = len(routed)
+            for call in routed:
+                tool = call["tool"]
+                calls.append(
+                    RouterCall(
+                        tool=tool.split(".", 1)[1],
+                        input=call.get("input") or {},
+                        status=str(call.get("status") or ""),
+                        output=output,
+                        block=block,
+                        block_size=block_size,
                     )
+                )
         return calls
+
+    @property
+    def direct_network_calls(self) -> list[str]:
+        found: list[str] = []
+        for event in self.events:
+            if event.get("type") != "tool_use":
+                continue
+            part = event.get("part", {})
+            tool = str(part.get("tool", ""))
+            if tool in DIRECT_NETWORK_TOOLS:
+                found.append(tool)
+            structured = (
+                (part.get("state", {}).get("metadata") or {}).get("metadata") or {}
+            ).get("toolCalls") or []
+            for call in structured:
+                name = str(call.get("tool", ""))
+                if name in DIRECT_NETWORK_TOOLS:
+                    found.append(name)
+        return found
 
     def calls_to(self, tool: str) -> list[RouterCall]:
         return [call for call in self.router_calls if call.tool == tool]
@@ -167,6 +192,9 @@ def run_llm(opencode_exe: str, e2e_model: str) -> Callable[..., LLMRun]:
             finally:
                 if not os.environ.get("E2E_KEEP_TMP"):
                     shutil.rmtree(run_dir, ignore_errors=True)
+            assert not last.direct_network_calls, (
+                f"run used non-router network tools: {last.direct_network_calls}"
+            )
             if last.router_calls:
                 return last
         assert last is not None
@@ -275,7 +303,14 @@ def _run_in(
         encoding="utf-8",
     )
 
-    env = {k: v for k, v in os.environ.items() if k != "OPENCODE_SESSION_ID"}
+    inherited_config = {
+        "OPENCODE_SESSION_ID",
+        "OPENCODE_CONFIG",
+        "OPENCODE_CONFIG_DIR",
+        "OPENCODE_CONFIG_CONTENT",
+        "OPENCODE_CLI_CONFIG_CONTENT",
+    }
+    env = {k: v for k, v in os.environ.items() if k not in inherited_config}
     # opencode resolves its workspace from PWD, which subprocess cwd does not update.
     env["PWD"] = str(project)
     config_home = run_dir / "config"
