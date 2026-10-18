@@ -23,6 +23,7 @@ pytestmark = pytest.mark.e2e
 SERVERS = {"hello", "microsoftdocs", "tickets"}
 
 _LEARN_URL = re.compile(r"https?://[^\s<>()\"']+")
+_URL_TRIM = ".,;:!?*_`~[]\"'"
 
 _ACME_SEED = [
     {
@@ -61,7 +62,7 @@ _ACME_SEED = [
 
 
 def _final_learn_urls(text: str) -> list[str]:
-    urls = [match.rstrip(".,;:!?") for match in _LEARN_URL.findall(text)]
+    urls = [match.strip(_URL_TRIM) for match in _LEARN_URL.findall(text)]
     return [url for url in urls if "learn.microsoft.com" in url.lower()]
 
 
@@ -74,9 +75,57 @@ def _assert_url_came_from_output(text: str, outputs: list[str]) -> None:
     )
 
 
-def _assert_jsonserializer_came_from_output(text: str, outputs: list[str]) -> None:
-    assert "jsonserializer" in text.lower(), text
-    assert any("jsonserializer" in output.lower() for output in outputs), outputs
+_HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$", re.MULTILINE)
+_HTML_TITLE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+_TITLE_FIELD = re.compile(
+    r"^\s*(?:title|name)\s*[:=]\s*[\"'`]?(.+?)[\"'`]?\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _collect_titles(payload, titles: list[str]) -> None:
+    if isinstance(payload, str):
+        stripped = payload.strip()
+        if stripped.startswith(("{", "[")):
+            try:
+                _collect_titles(json.loads(stripped), titles)
+                return
+            except json.JSONDecodeError:
+                pass
+        titles.extend(_HEADING.findall(payload))
+        titles.extend(_HTML_TITLE.findall(payload))
+        titles.extend(_TITLE_FIELD.findall(payload))
+    elif isinstance(payload, list):
+        for item in payload:
+            _collect_titles(item, titles)
+    elif isinstance(payload, dict):
+        for key in ("title", "name"):
+            value = payload.get(key)
+            if isinstance(value, str):
+                titles.append(value)
+        for key in ("content", "text", "result", "output"):
+            if key in payload:
+                _collect_titles(payload[key], titles)
+
+
+def _normalised_title(text: str) -> str:
+    text = re.sub(r"[`*_#>\[\]]+", "", text)
+    return re.sub(r"\s+", " ", text).strip().lower()
+
+
+def _assert_title_came_from_output(text: str, outputs: list[str]) -> None:
+    titles: list[str] = []
+    for output in outputs:
+        _collect_titles(output, titles)
+    candidates = {
+        _normalised_title(title)
+        for title in titles
+        if len(_normalised_title(title)) >= 15
+        and " " in _normalised_title(title)
+    }
+    assert candidates, (titles, outputs)
+    answer = _normalised_title(text)
+    assert any(title in answer for title in candidates), (candidates, text)
 
 
 _LEARN_CASES = {
@@ -111,7 +160,7 @@ _LEARN_CASES = {
         "check_arg": lambda call: "jsonserializer"
         in (call.arg("url") or "").lower(),
         "check_text": lambda text: "jsonserializer" in text.lower(),
-        "check_output": _assert_jsonserializer_came_from_output,
+        "check_output": _assert_title_came_from_output,
     },
 }
 
@@ -154,19 +203,26 @@ def _parse_names(call) -> set[str] | None:
 
 
 def _assert_open_ticket_count(text: str, count: int) -> None:
-    assert re.search(rf"\b{count}\b", text), text
     lowered = text.lower()
-    assert re.search(
-        r"\bopen\b[^.\n]{0,30}\btickets?\b|\btickets?\b[^.\n]{0,30}\bopen\b",
-        lowered,
-    ), text
+    number = rf"(?<!\d){count}(?!\d)"
+    word_gap = r"(?:[a-z-]+\s+){0,2}"
+    patterns = [
+        rf"{number}\s+{word_gap}open\s+{word_gap}tickets?\b",
+        rf"\bopen\s+{word_gap}tickets?\b(?:\s+(?:is|are|:|=)\s*|\s+){number}",
+        rf"\b{number}\s+{word_gap}tickets?\s+(?:are\s+)?"
+        rf"(?:currently\s+|still\s+)?open\b",
+    ]
+    assert any(re.search(pattern, lowered) for pattern in patterns), text
 
 
 def _assert_status_mentioned(text: str, status: str) -> None:
+    status = re.escape(status.lower())
     lowered = text.lower()
     assert re.search(
-        rf"\bstatus\b[^.\n]{{0,40}}\b{status}\b"
-        rf"|\b(?:is|currently)\b[^.\n]{{0,20}}\b{status}\b",
+        rf"\bstatus\b\s*(?:is|:|=)?\s*(?:currently\s+|still\s+|now\s+)?"
+        rf"[`*_\"']*{status}\b"
+        rf"|\b(?:is|remains|stays)\b\s*(?:currently\s+|still\s+|now\s+)?"
+        rf"[`*_\"']*{status}\b",
         lowered,
     ), text
 
@@ -220,7 +276,7 @@ def test_create_customer_ticket(run_llm):
     assert ticket["customer"].lower() == "acme corp"
     assert "invoice" in f"{ticket['subject']} {ticket['body']}".lower()
     assert ticket["status"] == "open"
-    assert ticket["id"] in run.final_text
+    assert ticket["id"] in run.final_answer
 
 
 def test_create_then_look_up_ticket(run_llm):
@@ -233,8 +289,8 @@ def test_create_then_look_up_ticket(run_llm):
     assert len(tickets) == 1, tickets
     ticket = tickets[0]
     assert "refund" in f"{ticket['subject']} {ticket['body']}".lower()
-    assert ticket["id"] in run.final_text
-    _assert_status_mentioned(run.final_text, ticket["status"])
+    assert ticket["id"] in run.final_answer
+    _assert_status_mentioned(run.final_answer, ticket["status"])
 
 
 def test_close_ticket(run_llm):
@@ -243,7 +299,7 @@ def test_close_ticket(run_llm):
     expected = [dict(ticket) for ticket in _ACME_SEED]
     expected[0]["status"] = "closed"
     assert run.tickets == expected
-    assert "tck-0001" in run.final_text.lower()
+    assert "tck-0001" in run.final_answer.lower()
 
 
 def test_count_open_tickets(run_llm):
@@ -252,8 +308,14 @@ def test_count_open_tickets(run_llm):
         seed=_ACME_SEED,
     )
 
-    _assert_open_ticket_count(run.final_text, 2)
-    assert "acme" in run.final_text.lower(), run.final_text
+    assert run.tickets == _ACME_SEED
+    open_tickets = [
+        ticket
+        for ticket in _ACME_SEED
+        if ticket["customer"].lower() == "acme corp" and ticket["status"] == "open"
+    ]
+    _assert_open_ticket_count(run.final_answer, len(open_tickets))
+    assert "acme" in run.final_answer.lower(), run.final_text
 
 
 def test_local_tool_selection(run_llm):
@@ -273,8 +335,8 @@ def test_local_tool_selection(run_llm):
     if greeted[0].own_output is not None:
         assert run.nonce in greeted[0].own_output
 
-    assert run.nonce in run.final_text
-    assert "GOODBYE_SENTINEL" not in run.final_text
+    assert run.nonce in run.final_answer
+    assert "GOODBYE_SENTINEL" not in run.final_answer
 
     routed = run.calls_to("run_mcp_tool")
     assert all(call.arg("mcp_tool") != "goodbye" for call in routed)
@@ -308,5 +370,5 @@ def test_microsoft_learn_tool_selection(run_llm, case):
         if call.succeeded and call.own_output is not None
     ]
     if outputs:
-        case["check_output"](run.final_text, outputs)
-    assert case["check_text"](run.final_text), run.final_text
+        case["check_output"](run.final_answer, outputs)
+    assert case["check_text"](run.final_answer), run.final_text
