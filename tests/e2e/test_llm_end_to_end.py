@@ -1,8 +1,9 @@
 """Real end-to-end tests: a configurable LLM drives mcp-router.
 
-The prompts are goal-only: they never name the router, a server, a tool, or an
-argument. The model must discover what is available and choose the right tool
-from the descriptions it reads.
+Prompts are plain user goals; they never name the router, a server, a tool, or
+an argument. The ticket tests are the strongest: a fabricated answer cannot
+produce a ticket in the server's store, so success requires the router to have
+worked.
 
 These are excluded from the default suite (see ``addopts`` in pyproject.toml).
 Run them with:
@@ -19,7 +20,44 @@ import pytest
 
 pytestmark = pytest.mark.e2e
 
+SERVERS = {"hello", "microsoftdocs", "tickets"}
+
 _LEARN_URL = re.compile(r"https?://[^\s<>()\"']+")
+
+_ACME_SEED = [
+    {
+        "id": "TCK-0001",
+        "customer": "Acme Corp",
+        "subject": "Invoice is wrong",
+        "body": "The latest invoice has the wrong amount.",
+        "priority": "normal",
+        "status": "open",
+    },
+    {
+        "id": "TCK-0002",
+        "customer": "Acme Corp",
+        "subject": "Refund request",
+        "body": "Please refund the duplicate charge.",
+        "priority": "normal",
+        "status": "open",
+    },
+    {
+        "id": "TCK-0003",
+        "customer": "Acme Corp",
+        "subject": "Old issue",
+        "body": "Already resolved.",
+        "priority": "normal",
+        "status": "closed",
+    },
+    {
+        "id": "TCK-0004",
+        "customer": "Globex",
+        "subject": "Unrelated ticket",
+        "body": "Not Acme.",
+        "priority": "normal",
+        "status": "open",
+    },
+]
 
 
 def _final_learn_urls(text: str) -> list[str]:
@@ -30,9 +68,10 @@ def _final_learn_urls(text: str) -> list[str]:
 def _assert_url_came_from_output(text: str, outputs: list[str]) -> None:
     urls = _final_learn_urls(text)
     assert urls, text
-    assert any(
-        url.lower() in output.lower() for url in urls for output in outputs
-    ), (urls, outputs)
+    assert any(url.lower() in output.lower() for url in urls for output in outputs), (
+        urls,
+        outputs,
+    )
 
 
 def _assert_jsonserializer_came_from_output(text: str, outputs: list[str]) -> None:
@@ -43,9 +82,8 @@ def _assert_jsonserializer_came_from_output(text: str, outputs: list[str]) -> No
 _LEARN_CASES = {
     "docs-search": {
         "prompt": (
-            "Use a tool to check what Microsoft's official documentation says "
-            "about the Model Context Protocol, and give me one "
-            "learn.microsoft.com link."
+            "What does Microsoft's official documentation say about the Model "
+            "Context Protocol? Give me one learn.microsoft.com link."
         ),
         "tool": "microsoft_docs_search",
         "check_arg": lambda call: "model context protocol"
@@ -55,8 +93,8 @@ _LEARN_CASES = {
     },
     "code-sample": {
         "prompt": (
-            "Use a tool to find an official Microsoft code sample that shows an "
-            "HTTP client in Python, and give me one learn.microsoft.com link."
+            "Find an official Microsoft code sample that shows an HTTP client in "
+            "Python. Give me one learn.microsoft.com link."
         ),
         "tool": "microsoft_code_sample_search",
         "check_arg": lambda call: "http client" in (call.arg("query") or "").lower()
@@ -66,9 +104,8 @@ _LEARN_CASES = {
     },
     "docs-fetch": {
         "prompt": (
-            "Use a tool to find the Microsoft Learn page for the C# "
-            "JsonSerializer class, then read that page and tell me the exact "
-            "title it displays."
+            "Find the Microsoft Learn page for the C# JsonSerializer class and "
+            "tell me the exact title it displays."
         ),
         "tool": "microsoft_docs_fetch",
         "check_arg": lambda call: "jsonserializer"
@@ -96,7 +133,7 @@ def _parse_names(call) -> set[str] | None:
     }
 
 
-def _assert_both_servers_were_discovered(run) -> None:
+def _assert_all_servers_were_discovered(run) -> None:
     installed = [call for call in run.calls_to("get_installed_mcps") if call.succeeded]
     assert installed, "get_installed_mcps did not succeed"
     listings: list[set[str]] = []
@@ -108,7 +145,7 @@ def _assert_both_servers_were_discovered(run) -> None:
         "no get_installed_mcps result could be attributed to a single call"
     )
     names = set().union(*listings)
-    assert {"hello", "microsoftdocs"} <= names, names
+    assert SERVERS <= names, names
 
 
 def _assert_tool_listing(run, server: str, expected_tools: set[str]):
@@ -133,13 +170,57 @@ def _assert_tool_listing(run, server: str, expected_tools: set[str]):
         assert expected_tools <= names, (expected_tools, names)
 
 
-def test_local_tool_selection(run_llm):
+def test_create_customer_ticket(run_llm):
+    run = run_llm("Create a customer ticket for Acme Corp: their invoice is wrong.")
+
+    tickets = run.tickets
+    assert len(tickets) == 1, tickets
+    ticket = tickets[0]
+    assert ticket["customer"].lower() == "acme corp"
+    assert "invoice" in f"{ticket['subject']} {ticket['body']}".lower()
+    assert ticket["status"] == "open"
+    assert ticket["id"] in run.final_text
+
+
+def test_create_then_look_up_ticket(run_llm):
     run = run_llm(
-        "Say hello to Ada using a tool, then give me the exact output the tool "
-        "returned, including any unique code in it."
+        "Create a ticket for a refund request from Acme Corp, then look it up "
+        "and tell me its status."
     )
 
-    _assert_both_servers_were_discovered(run)
+    tickets = run.tickets
+    assert len(tickets) == 1, tickets
+    ticket = tickets[0]
+    assert "refund" in f"{ticket['subject']} {ticket['body']}".lower()
+    assert ticket["id"] in run.final_text
+    assert ticket["status"] in run.final_text.lower()
+
+
+def test_close_ticket(run_llm):
+    run = run_llm("Close ticket TCK-0001 for Acme Corp.", seed=_ACME_SEED)
+
+    tickets = {ticket["id"]: ticket for ticket in run.tickets}
+    assert tickets["TCK-0001"]["status"] == "closed"
+    assert "tck-0001" in run.final_text.lower()
+
+
+def test_count_open_tickets(run_llm):
+    run = run_llm(
+        "How many open tickets does Acme Corp have?",
+        seed=_ACME_SEED,
+    )
+
+    assert "2" in run.final_text, run.final_text
+    assert "acme" in run.final_text.lower(), run.final_text
+
+
+def test_local_tool_selection(run_llm):
+    run = run_llm(
+        "Say hello to Ada and give me the exact output you got back, including "
+        "any unique code in it."
+    )
+
+    _assert_all_servers_were_discovered(run)
     _assert_tool_listing(run, "hello", {"hello", "goodbye", "echo"})
 
     greeted = [
@@ -166,7 +247,7 @@ def test_local_tool_selection(run_llm):
 def test_microsoft_learn_tool_selection(run_llm, case):
     run = run_llm(case["prompt"])
 
-    _assert_both_servers_were_discovered(run)
+    _assert_all_servers_were_discovered(run)
     _assert_tool_listing(run, "microsoftdocs", {case["tool"]})
 
     calls = [
