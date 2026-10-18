@@ -1,0 +1,5 @@
+# This repository intentionally has no CI. The no-mistakes gate reads this
+# declaration only from the trusted default branch, and treats a zero-check
+# result on the PR head as passed (naming `no_ci: true` as the evidence).
+# See the no-mistakes Repo Config reference, field `no_ci`.
+no_ci: true
