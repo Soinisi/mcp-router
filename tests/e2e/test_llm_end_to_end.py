@@ -1,9 +1,8 @@
 """Real end-to-end tests: a configurable LLM drives mcp-router.
 
-Prompts are plain user goals; they never name the router, a server, a tool, or
-an argument. The ticket tests are the strongest: a fabricated answer cannot
-produce a ticket in the server's store, so success requires the router to have
-worked.
+Prompts are plain user goals; they do not name the router or tell the model
+which tool to call. The create and close tests assert the ticket server's JSON
+store, and the lookup and count tests assert the final answer.
 
 These are excluded from the default suite (see ``addopts`` in pyproject.toml).
 Run them with:
@@ -202,29 +201,72 @@ def _parse_names(call) -> set[str] | None:
     return _tool_names(output)
 
 
-def _assert_open_ticket_count(text: str, count: int) -> None:
-    lowered = text.lower()
-    number = rf"(?<!\d){count}(?!\d)"
-    word_gap = r"(?:[a-z-]+\s+){0,2}"
-    patterns = [
-        rf"{number}\s+{word_gap}open\s+{word_gap}tickets?\b",
-        rf"\bopen\s+{word_gap}tickets?\b(?:\s+(?:is|are|:|=)\s*|\s+){number}",
-        rf"\b{number}\s+{word_gap}tickets?\s+(?:are\s+)?"
-        rf"(?:currently\s+|still\s+)?open\b",
+_NUMBER_WORDS = {
+    0: "zero",
+    1: "one",
+    2: "two",
+    3: "three",
+    4: "four",
+    5: "five",
+    6: "six",
+    7: "seven",
+    8: "eight",
+    9: "nine",
+    10: "ten",
+}
+_CLAUSE_SPLIT = re.compile(r"[.;!?\n]|,?\s+(?:and|but|while|whereas)\s+")
+_NEGATION = re.compile(r"\b(?:not|no|never|cannot)\b|\w+n't\b")
+_OPEN_TICKETS = r"\bopen\s+(?:[a-z-]+\s+){0,2}tickets?\b"
+_OPEN_TICKET_PATTERNS = (
+    r"\bacme\b[^.;!?\n\d]{{0,60}}?{number}\s+(?:[a-z-]+\s+){{0,2}}{open_tickets}",
+    r"\bacme\b[^.;!?\n\d]{{0,60}}?{number}\s+(?:[a-z-]+\s+){{0,2}}tickets?\s+"
+    r"(?:are\s+|is\s+)?(?:currently\s+|still\s+|now\s+)?open\b",
+    r"{open_tickets}[^.;!?\n\d]{{0,40}}?\bacme\b[^.;!?\n\d]{{0,20}}?{number}",
+    r"\bacme\b[^.;!?\n\d]{{0,40}}?{open_tickets}[^.;!?\n\d]{{0,20}}?{number}",
+    r"{number}\s+(?:[a-z-]+\s+){{0,2}}{open_tickets}[^.;!?\n\d]{{0,30}}?\bacme\b",
+)
+
+
+def _clauses(text: str) -> list[str]:
+    return [
+        clause.strip()
+        for clause in _CLAUSE_SPLIT.split(text.lower())
+        if clause.strip()
     ]
-    assert any(re.search(pattern, lowered) for pattern in patterns), text
 
 
-def _assert_status_mentioned(text: str, status: str) -> None:
-    status = re.escape(status.lower())
+def _assert_open_ticket_count(text: str, count: int) -> None:
+    word = _NUMBER_WORDS.get(count)
+    number = rf"\b(?:{count}{'|' + word if word else ''})\b"
+    patterns = [
+        pattern.format(number=number, open_tickets=_OPEN_TICKETS)
+        for pattern in _OPEN_TICKET_PATTERNS
+    ]
+    for clause in _clauses(text):
+        for pattern in patterns:
+            for match in re.finditer(pattern, clause):
+                number_start = match.start() + re.search(number, match.group(0)).start()
+                if not _NEGATION.search(clause[:number_start]):
+                    return
+    raise AssertionError(text)
+
+
+def _assert_status_mentioned(text: str, ticket_id: str, status: str) -> None:
     lowered = text.lower()
-    assert re.search(
-        rf"\bstatus\b\s*(?:is|:|=)?\s*(?:currently\s+|still\s+|now\s+)?"
-        rf"[`*_\"']*{status}\b"
-        rf"|\b(?:is|remains|stays)\b\s*(?:currently\s+|still\s+|now\s+)?"
-        rf"[`*_\"']*{status}\b",
-        lowered,
-    ), text
+    assert ticket_id.lower() in lowered, text
+    status_re = re.compile(rf"\b{re.escape(status.lower())}\b")
+    references = ("it", "its", "this ticket", "the ticket", "that ticket")
+    for clause in _clauses(lowered):
+        bound = ticket_id.lower() in clause or any(
+            re.search(rf"\b{re.escape(reference)}\b", clause)
+            for reference in references
+        )
+        if not bound:
+            continue
+        for match in status_re.finditer(clause):
+            if not _NEGATION.search(clause[: match.start()]):
+                return
+    raise AssertionError(text)
 
 
 def _assert_all_servers_were_discovered(run) -> None:
@@ -276,7 +318,7 @@ def test_create_customer_ticket(run_llm):
     assert ticket["customer"].lower() == "acme corp"
     assert "invoice" in f"{ticket['subject']} {ticket['body']}".lower()
     assert ticket["status"] == "open"
-    assert ticket["id"] in run.final_answer
+    assert ticket["id"].lower() in run.final_answer.lower()
 
 
 def test_create_then_look_up_ticket(run_llm):
@@ -288,9 +330,10 @@ def test_create_then_look_up_ticket(run_llm):
     tickets = run.tickets
     assert len(tickets) == 1, tickets
     ticket = tickets[0]
+    assert ticket["customer"].lower() == "acme corp"
     assert "refund" in f"{ticket['subject']} {ticket['body']}".lower()
-    assert ticket["id"] in run.final_answer
-    _assert_status_mentioned(run.final_answer, ticket["status"])
+    assert ticket["id"].lower() in run.final_answer.lower()
+    _assert_status_mentioned(run.final_answer, ticket["id"], ticket["status"])
 
 
 def test_close_ticket(run_llm):
@@ -299,7 +342,7 @@ def test_close_ticket(run_llm):
     expected = [dict(ticket) for ticket in _ACME_SEED]
     expected[0]["status"] = "closed"
     assert run.tickets == expected
-    assert "tck-0001" in run.final_answer.lower()
+    _assert_status_mentioned(run.final_answer, "TCK-0001", "closed")
 
 
 def test_count_open_tickets(run_llm):
@@ -315,7 +358,6 @@ def test_count_open_tickets(run_llm):
         if ticket["customer"].lower() == "acme corp" and ticket["status"] == "open"
     ]
     _assert_open_ticket_count(run.final_answer, len(open_tickets))
-    assert "acme" in run.final_answer.lower(), run.final_text
 
 
 def test_local_tool_selection(run_llm):
