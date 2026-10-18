@@ -36,8 +36,9 @@ class RouterCall:
     tool: str
     input: dict[str, Any] = field(default_factory=dict)
     status: str = ""
-    code: str = ""
     output: str = ""
+    block: int = 0
+    block_size: int = 1
 
     def arg(self, name: str) -> str | None:
         if name in self.input:
@@ -49,7 +50,13 @@ class RouterCall:
 
     @property
     def succeeded(self) -> bool:
-        return self.status == "completed" and bool(self.output.strip())
+        if self.status != "completed":
+            return False
+        return self.block_size > 1 or bool(self.output.strip())
+
+    @property
+    def own_output(self) -> str | None:
+        return self.output if self.block_size == 1 else None
 
 
 @dataclass
@@ -61,7 +68,7 @@ class LLMRun:
     @property
     def router_calls(self) -> list[RouterCall]:
         calls: list[RouterCall] = []
-        for event in self.events:
+        for block, event in enumerate(self.events):
             if event.get("type") != "tool_use":
                 continue
             state = event.get("part", {}).get("state", {})
@@ -72,11 +79,11 @@ class LLMRun:
                 output = raw_output
             else:
                 output = json.dumps(raw_output, ensure_ascii=False, default=str)
-            code = (state.get("input") or {}).get("code", "")
 
             structured = (
                 (state.get("metadata") or {}).get("metadata") or {}
             ).get("toolCalls") or []
+            block_size = len(structured)
             for call in structured:
                 tool = call.get("tool", "")
                 if tool.startswith("mcp-router."):
@@ -85,8 +92,9 @@ class LLMRun:
                             tool=tool.split(".", 1)[1],
                             input=call.get("input") or {},
                             status=str(call.get("status") or ""),
-                            code=code,
                             output=output,
+                            block=block,
+                            block_size=block_size,
                         )
                     )
         return calls
