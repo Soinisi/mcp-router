@@ -27,19 +27,9 @@ import pytest
 import yaml
 
 HELLO_SERVER = Path(__file__).with_name("hello_server.py")
-DEFAULT_MODEL = "openai/gpt-6-luna"
 LEARN_URL = "https://learn.microsoft.com/api/mcp"
 
 ROUTER_CALL = re.compile(r'tools\[["\']mcp-router["\']\]\.([A-Za-z_]\w*)\s*\(')
-
-
-def _temp_root() -> Path | None:
-    """Prefer the approved /tmp/opencode scratch root when it exists."""
-    override = os.environ.get("E2E_TMP_ROOT")
-    if override:
-        return Path(override)
-    approved = Path("/tmp/opencode")
-    return approved if approved.is_dir() else None
 
 
 @dataclass
@@ -135,8 +125,8 @@ def opencode_exe() -> str:
 
 
 @pytest.fixture(scope="session")
-def e2e_model(opencode_exe: str) -> str:
-    model = os.environ.get("E2E_MODEL", DEFAULT_MODEL)
+def e2e_model(pytestconfig: pytest.Config, opencode_exe: str) -> str:
+    model = pytestconfig.getoption("e2e_model")
     try:
         listed = subprocess.run(
             [opencode_exe, "models"], capture_output=True, text=True, timeout=60
@@ -151,9 +141,7 @@ def e2e_model(opencode_exe: str) -> str:
 @pytest.fixture()
 def run_llm(opencode_exe: str, e2e_model: str) -> Callable[[str], LLMRun]:
     def _run(prompt: str) -> LLMRun:
-        run_dir = Path(
-            tempfile.mkdtemp(prefix="mcp-router-e2e-", dir=_temp_root())
-        )
+        run_dir = Path(tempfile.mkdtemp(prefix="mcp-router-e2e-"))
         try:
             return _run_in(run_dir, prompt, opencode_exe, e2e_model)
         finally:
@@ -209,8 +197,12 @@ def _run_in(
                             "type": "local",
                             "command": [sys.executable, "-m", "mcp_router.server"],
                             "environment": {"MCP_ROUTER_CONFIG": str(router_config)},
-                            "enabled": True,
-                            "timeout": 120000,
+                            "disabled": False,
+                            "timeout": {
+                                "startup": 120000,
+                                "catalog": 120000,
+                                "execution": 120000,
+                            },
                         }
                     },
                 },

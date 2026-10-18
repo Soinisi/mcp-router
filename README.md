@@ -78,10 +78,10 @@ registered servers: the keyless Microsoft Learn MCP and a local hello-world
 server (`tests/e2e/hello_server.py`). They are excluded from the default suite.
 
 ```sh
-E2E_MODEL=openai/gpt-6-luna uv run pytest -m e2e
+uv run pytest -m e2e --e2e-model openai/gpt-6-luna
 ```
 
-- `E2E_MODEL` — model in `provider/model` form (default `openai/gpt-6-luna`).
+- `--e2e-model` — model in `provider/model` form (default `openai/gpt-6-luna`).
 - `E2E_TIMEOUT` — per-run timeout in seconds (default 300).
 - `E2E_KEEP_TMP=1` — keep the generated temp project for debugging.
 
