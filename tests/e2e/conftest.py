@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import secrets
 import shutil
 import subprocess
@@ -29,8 +28,6 @@ import yaml
 HELLO_SERVER = Path(__file__).with_name("hello_server.py")
 LEARN_URL = "https://learn.microsoft.com/api/mcp"
 
-ROUTER_CALL = re.compile(r'tools\[["\']mcp-router["\']\]\.([A-Za-z_]\w*)\s*\(')
-
 
 @dataclass
 class RouterCall:
@@ -38,25 +35,21 @@ class RouterCall:
 
     tool: str
     input: dict[str, Any] = field(default_factory=dict)
+    status: str = ""
     code: str = ""
     output: str = ""
 
     def arg(self, name: str) -> str | None:
+        if name in self.input:
+            return str(self.input[name])
         arguments = self.input.get("arguments")
         if isinstance(arguments, dict) and name in arguments:
             return str(arguments[name])
-        if name in self.input:
-            return str(self.input[name])
-        match = re.search(rf'{re.escape(name)}\s*:\s*["\']([^"\']*)["\']', self.code)
-        return match.group(1) if match else None
+        return None
 
     @property
     def succeeded(self) -> bool:
-        lowered = self.output.lower()
-        return bool(self.output.strip()) and not any(
-            marker in lowered
-            for marker in ("typeerror", "unknown server", "timed out", '"iserror": true')
-        )
+        return self.status == "completed" and bool(self.output.strip())
 
 
 @dataclass
@@ -72,7 +65,13 @@ class LLMRun:
             if event.get("type") != "tool_use":
                 continue
             state = event.get("part", {}).get("state", {})
-            output = str(state.get("output", ""))
+            raw_output = state.get("output")
+            if raw_output is None:
+                output = ""
+            elif isinstance(raw_output, str):
+                output = raw_output
+            else:
+                output = json.dumps(raw_output, ensure_ascii=False, default=str)
             code = (state.get("input") or {}).get("code", "")
 
             structured = (
@@ -85,14 +84,11 @@ class LLMRun:
                         RouterCall(
                             tool=tool.split(".", 1)[1],
                             input=call.get("input") or {},
+                            status=str(call.get("status") or ""),
                             code=code,
                             output=output,
                         )
                     )
-            if not structured:
-                match = ROUTER_CALL.search(code)
-                if match:
-                    calls.append(RouterCall(tool=match.group(1), code=code, output=output))
         return calls
 
     def calls_to(self, tool: str) -> list[RouterCall]:
