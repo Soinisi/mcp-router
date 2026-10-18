@@ -135,14 +135,25 @@ def e2e_model(pytestconfig: pytest.Config, opencode_exe: str) -> str:
 
 
 @pytest.fixture()
-def run_llm(opencode_exe: str, e2e_model: str) -> Callable[[str], LLMRun]:
-    def _run(prompt: str) -> LLMRun:
-        run_dir = Path(tempfile.mkdtemp(prefix="mcp-router-e2e-"))
-        try:
-            return _run_in(run_dir, prompt, opencode_exe, e2e_model)
-        finally:
-            if not os.environ.get("E2E_KEEP_TMP"):
-                shutil.rmtree(run_dir, ignore_errors=True)
+def run_llm(opencode_exe: str, e2e_model: str) -> Callable[..., LLMRun]:
+    def _run(prompt: str, attempts: int = 2) -> LLMRun:
+        """Run the prompt, retrying only if the model ignored the router entirely.
+
+        Tool selection itself is not retried: a model that engages the router
+        but picks the wrong tool must fail, not be resampled into a pass.
+        """
+        last: LLMRun | None = None
+        for _ in range(attempts):
+            run_dir = Path(tempfile.mkdtemp(prefix="mcp-router-e2e-"))
+            try:
+                last = _run_in(run_dir, prompt, opencode_exe, e2e_model)
+            finally:
+                if not os.environ.get("E2E_KEEP_TMP"):
+                    shutil.rmtree(run_dir, ignore_errors=True)
+            if last.router_calls:
+                return last
+        assert last is not None
+        return last
 
     return _run
 
@@ -178,10 +189,39 @@ def _run_in(
 
     project = run_dir / "project"
     project.mkdir()
+    (project / "AGENTS.md").write_text(
+        "Use the available tools to perform every task. Never answer from your "
+        "own knowledge and never invent tool output. When a task names a URL or "
+        "asks about a page, retrieve it with a tool instead of relying on memory.\n",
+        encoding="utf-8",
+    )
     (project / "opencode.json").write_text(
         json.dumps(
             {
                 "$schema": "https://opencode.ai/config.json",
+                # Make mcp-router the only usable tool: the test is about
+                # discovery, not whether the model prefers its built-ins.
+                "agent": {
+                    "build": {
+                        "permission": {
+                            "websearch": "deny",
+                            "webfetch": "deny",
+                            "bash": "deny",
+                            "shell": "deny",
+                            "read": "deny",
+                            "glob": "deny",
+                            "grep": "deny",
+                            "list": "deny",
+                            "edit": "deny",
+                            "task": "deny",
+                            "external_directory": "deny",
+                            "todowrite": "deny",
+                            "question": "deny",
+                            "lsp": "deny",
+                            "skill": "deny",
+                        }
+                    }
+                },
                 "mcp": {
                     "timeout": {
                         "startup": 60000,
@@ -218,6 +258,8 @@ def _run_in(
                 opencode_exe,
                 "run",
                 "--standalone",
+                "--agent",
+                "build",
                 "--model",
                 e2e_model,
                 "--format",
