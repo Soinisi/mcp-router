@@ -71,6 +71,24 @@ mcp-router remove filesystem [--project]
 `add` takes **our** spec (a single server mapping); it does not parse VS Code or
 any other client's format.
 
+## End-to-end tests
+
+The LLM-driven tests drive the router through a real agent (`opencode`) with two
+registered servers: the keyless Microsoft Learn MCP and a local hello-world
+server (`tests/e2e/hello_server.py`). They are excluded from the default suite.
+
+```sh
+E2E_MODEL=openai/gpt-6-luna uv run pytest -m e2e
+```
+
+- `E2E_MODEL` — model in `provider/model` form (default `openai/gpt-6-luna`).
+- `E2E_TIMEOUT` — per-run timeout in seconds (default 300).
+- `E2E_KEEP_TMP=1` — keep the generated temp project for debugging.
+
+These require `opencode` on `PATH` with a configured provider, and they hit
+`learn.microsoft.com` over the network. They skip when `opencode` or the model
+is unavailable.
+
 ## Connecting a client
 
 Point your MCP client at the stdio server:
