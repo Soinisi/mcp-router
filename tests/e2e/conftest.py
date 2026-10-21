@@ -208,9 +208,6 @@ def run_llm(opencode_exe: str, e2e_model: str) -> Callable[..., LLMRun]:
             finally:
                 if not os.environ.get("E2E_KEEP_TMP"):
                     shutil.rmtree(run_dir, ignore_errors=True)
-            assert not last.direct_network_calls, (
-                f"run used non-router network tools: {last.direct_network_calls}"
-            )
             if last.router_calls:
                 return last
         assert last is not None

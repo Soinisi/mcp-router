@@ -56,7 +56,9 @@ tools for all other ("registered") servers behind it. See `CONTEXT.md`
   `uv run pytest -m e2e --e2e-model openai/gpt-6-luna`; they drive `opencode`
   against a temp project with three servers: Microsoft Learn (network),
   `tests/e2e/hello_server.py`, and `tests/e2e/ticket_server.py`. Prompts are plain
-  user goals; the ticket tests assert the server's JSON store.
+  user goals; the ticket tests assert the server's JSON store. A deterministic
+  `tests/e2e/test_learn_remote.py` covers the Microsoft Learn remote path without
+  an LLM.
 
 ## Agent skills
 

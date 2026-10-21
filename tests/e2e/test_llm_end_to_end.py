@@ -246,7 +246,13 @@ def _clauses(text: str) -> list[str]:
     ]
 
 
+def _plain(text: str) -> str:
+    """Drop Markdown emphasis/code markers before natural-language matching."""
+    return text.replace("**", "").replace("__", "").replace("`", "").replace("*", "")
+
+
 def _assert_open_ticket_count(text: str, count: int) -> None:
+    text = _plain(text)
     word = _NUMBER_WORDS.get(count)
     number = rf"\b(?:{count}{'|' + word if word else ''})\b"
     patterns = [
@@ -300,7 +306,7 @@ def _status_predicate(sentence: str, ticket_id: str, status: str) -> bool:
 
 
 def _assert_status_mentioned(text: str, ticket_id: str, status: str) -> None:
-    lowered = text.lower()
+    lowered = _plain(text).lower()
     assert ticket_id.lower() in lowered, text
     expected = status.lower()
     competitor = "closed" if expected == "open" else "open"
