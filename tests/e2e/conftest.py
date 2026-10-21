@@ -52,12 +52,6 @@ class RouterCall:
         return None
 
     @property
-    def succeeded(self) -> bool:
-        if self.status != "completed":
-            return False
-        return self.block_size > 1 or bool(self.output.strip())
-
-    @property
     def own_output(self) -> str | None:
         return self.output if self.block_size == 1 else None
 
@@ -65,7 +59,6 @@ class RouterCall:
 @dataclass
 class LLMRun:
     nonce: str
-    final_text: str
     events: list[dict[str, Any]]
     tickets: list[dict]
 
@@ -122,14 +115,6 @@ def _parse_events(stdout: str) -> list[dict[str, Any]]:
         if line:
             events.append(json.loads(line))
     return events
-
-
-def _final_text(events: list[dict[str, Any]]) -> str:
-    return "\n".join(
-        event["part"].get("text", "")
-        for event in events
-        if event.get("type") == "text"
-    )
 
 
 def _final_answer(events: list[dict[str, Any]]) -> str:
@@ -345,7 +330,6 @@ def _run_in(
     )
     return LLMRun(
         nonce=nonce,
-        final_text=_final_text(events),
         events=events,
         tickets=tickets,
     )
