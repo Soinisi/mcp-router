@@ -20,6 +20,7 @@ from test_llm_end_to_end import _assert_open_ticket_count, _assert_status_mentio
         "Acme Corp has 2 of the 3 open tickets.",
         "2 of the 3 open tickets belong to Acme Corp.",
         "Both Acme Corp and Globex have open tickets; Acme has 2 open ones.",
+        "Acme Corp has **2** open tickets.",
     ],
 )
 def test_open_ticket_count_accepts_acme_count(text):
@@ -52,6 +53,8 @@ def test_open_ticket_count_rejects_wrong_count_or_customer(text):
         "TCK-0001 is open, not closed.",
         "Created ticket TCK-0001 for your refund. It's open.",
         "Created ticket TCK-0001 for your refund. It’s open.",
+        "TCK-0001 is ready. Its status is **open**.",
+        "Created ticket TCK-0001. It’s **open**.",
     ],
 )
 def test_status_answer_accepts_open_as_the_bound_predicate(text):
@@ -67,6 +70,7 @@ def test_status_answer_accepts_open_as_the_bound_predicate(text):
         "TCK-0002 is open.",
         "TCK-0001 is open. Actually it's closed.",
         "TCK-0001 is open. Actually it’s closed.",
+        "TCK-0001 is **open**. Actually it’s **closed**.",
     ],
 )
 def test_status_answer_rejects_competing_or_missing_status(text):

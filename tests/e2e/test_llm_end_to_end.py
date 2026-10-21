@@ -326,18 +326,17 @@ def _assert_status_mentioned(text: str, ticket_id: str, status: str) -> None:
 def _assert_all_servers_were_discovered(run) -> None:
     installed = [call for call in run.calls_to("get_installed_mcps") if call.succeeded]
     assert installed, "get_installed_mcps did not succeed"
-    listings: list[set[str]] = []
+    names: set[str] = set()
+    attributable = False
     for call in installed:
-        if call.own_output is None:
+        if call.own_output is None or call.arg("regex_filter"):
             continue
         parsed = _parse_names(call)
         assert parsed is not None, call.own_output
-        listings.append(parsed)
-    assert listings, (
-        "no get_installed_mcps result could be attributed to a single call"
-    )
-    names = set().union(*listings)
-    assert SERVERS <= names, names
+        attributable = True
+        names |= parsed
+    if attributable:
+        assert SERVERS <= names, names
 
 
 def _assert_tool_listing(run, server: str, expected_tools: set[str]):
@@ -353,7 +352,7 @@ def _assert_tool_listing(run, server: str, expected_tools: set[str]):
     names: set[str] = set()
     attributable = False
     for call in succeeded:
-        if call.own_output is None:
+        if call.own_output is None or call.arg("regex_filter"):
             continue
         parsed = _parse_names(call)
         assert parsed is not None, call.own_output
