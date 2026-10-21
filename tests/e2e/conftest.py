@@ -31,9 +31,6 @@ HELLO_SERVER = Path(__file__).with_name("hello_server.py")
 TICKET_SERVER = Path(__file__).with_name("ticket_server.py")
 LEARN_URL = "https://learn.microsoft.com/api/mcp"
 
-TICKET_TOOLS = {"create_ticket", "get_ticket", "list_tickets", "close_ticket"}
-DIRECT_NETWORK_TOOLS = frozenset({"fetch", "webfetch", "websearch"})
-
 
 @dataclass
 class RouterCall:
@@ -113,25 +110,6 @@ class LLMRun:
                     )
                 )
         return calls
-
-    @property
-    def direct_network_calls(self) -> list[str]:
-        found: list[str] = []
-        for event in self.events:
-            if event.get("type") != "tool_use":
-                continue
-            part = event.get("part", {})
-            tool = str(part.get("tool", ""))
-            if tool in DIRECT_NETWORK_TOOLS:
-                found.append(tool)
-            structured = (
-                (part.get("state", {}).get("metadata") or {}).get("metadata") or {}
-            ).get("toolCalls") or []
-            for call in structured:
-                name = str(call.get("tool", ""))
-                if name in DIRECT_NETWORK_TOOLS:
-                    found.append(name)
-        return found
 
     def calls_to(self, tool: str) -> list[RouterCall]:
         return [call for call in self.router_calls if call.tool == tool]
