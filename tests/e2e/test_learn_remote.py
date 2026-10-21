@@ -1,8 +1,9 @@
 """Deterministic Microsoft Learn coverage through the router (no LLM).
 
-The LLM-driven Microsoft Learn cases can be answered from the model's own
-knowledge, so this test exercises the remote transport and the router's
-pass-through directly with an MCP client. It needs the network, hence ``e2e``.
+An LLM can answer Microsoft Learn questions from its own knowledge, and
+opencode's code-mode fetch cannot be disabled without also removing MCP tools,
+so this test exercises the remote transport and the router's pass-through
+directly with an MCP client. It needs the network, hence ``e2e``.
 """
 
 from __future__ import annotations

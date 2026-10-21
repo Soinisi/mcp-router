@@ -73,14 +73,13 @@ any other client's format.
 
 ## End-to-end tests
 
-The LLM-driven tests drive the router through a real agent (`opencode`) with
-three registered servers: the keyless Microsoft Learn MCP, a local hello-world
-server (`tests/e2e/hello_server.py`), and a mock customer-ticket server
-(`tests/e2e/ticket_server.py`). Prompts are plain user goals ("Create a customer
-ticket...", "How many open tickets...") and do not tell the model which tool to
-use. The create and close tests assert the server's JSON store; the lookup and
-count tests assert the final answer, and the count test also checks that the
-store is unchanged. They are excluded from the default suite.
+The LLM-driven tests drive the router through a real agent (`opencode`) against
+a local hello-world server (`tests/e2e/hello_server.py`) and a mock
+customer-ticket server (`tests/e2e/ticket_server.py`). Prompts are plain user
+goals ("Create a customer ticket...", "How many open tickets...") and do not
+tell the model which tool to use. The hello test proves selection with a random
+nonce; the ticket tests assert the server's JSON store, and the count test also
+checks that the store is unchanged. They are excluded from the default suite.
 
 ```sh
 uv run pytest -m e2e --e2e-model openai/gpt-6-luna
