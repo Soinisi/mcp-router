@@ -92,7 +92,10 @@ uv run pytest -m e2e --e2e-model openai/gpt-6-luna
 
 These require `opencode` on `PATH` with a configured provider, and they hit
 `learn.microsoft.com` over the network. They skip when `opencode` or the model
-is unavailable.
+is unavailable. A separate deterministic test
+(`tests/e2e/test_learn_remote.py`) exercises the Microsoft Learn remote path
+through the router without an LLM, so the remote transport is covered even when
+a model answers from its own knowledge.
 
 ## Connecting a client
 
