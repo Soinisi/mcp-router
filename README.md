@@ -90,12 +90,11 @@ uv run pytest -m e2e --e2e-model openai/gpt-6-luna
 - `E2E_TIMEOUT` — per-run timeout in seconds (default 300).
 - `E2E_KEEP_TMP=1` — keep the generated temp project for debugging.
 
-These require `opencode` on `PATH` with a configured provider, and they hit
-`learn.microsoft.com` over the network. They skip when `opencode` or the model
-is unavailable. A separate deterministic test
+The LLM tests require `opencode` on `PATH` with a configured provider and skip
+when it or the model is unavailable. A separate deterministic test
 (`tests/e2e/test_learn_remote.py`) exercises the Microsoft Learn remote path
-through the router without an LLM, so the remote transport is covered even when
-a model answers from its own knowledge.
+through the router without an LLM and needs network access to
+`learn.microsoft.com`.
 
 ## Connecting a client
 
