@@ -271,7 +271,7 @@ def _assert_open_ticket_count(text: str, count: int) -> None:
 _STATUS_REFERENCE = (
     r"(?:{ticket_id}|its|it|this\s+ticket|the\s+ticket|that\s+ticket)\b"
 )
-_STATUS_COPULA = r"(?:is|are|remains?|stays?|has\s+been|have\s+been)"
+_STATUS_COPULA = r"(?:is|are|remains?|stays?|has\s+been|have\s+been|['’]s)"
 _STATUS_ADVERB = r"(?:\s+(?:now|currently|still|already))?"
 
 

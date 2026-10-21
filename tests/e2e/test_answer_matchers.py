@@ -50,6 +50,8 @@ def test_open_ticket_count_rejects_wrong_count_or_customer(text):
         "TCK-0001 has status open.",
         "I looked up TCK-0001. Its status is open.",
         "TCK-0001 is open, not closed.",
+        "Created ticket TCK-0001 for your refund. It's open.",
+        "Created ticket TCK-0001 for your refund. It’s open.",
     ],
 )
 def test_status_answer_accepts_open_as_the_bound_predicate(text):
@@ -63,6 +65,8 @@ def test_status_answer_accepts_open_as_the_bound_predicate(text):
         "TCK-0001 is closed; it was open initially.",
         "TCK-0001 is not open.",
         "TCK-0002 is open.",
+        "TCK-0001 is open. Actually it's closed.",
+        "TCK-0001 is open. Actually it’s closed.",
     ],
 )
 def test_status_answer_rejects_competing_or_missing_status(text):
@@ -77,6 +81,8 @@ def test_status_answer_rejects_competing_or_missing_status(text):
         "I closed TCK-0001.",
         "I've closed ticket TCK-0001.",
         "TCK-0001 has been closed.",
+        "I closed ticket TCK-0001. It's closed.",
+        "I closed ticket TCK-0001. It’s closed.",
     ],
 )
 def test_status_answer_accepts_closed_as_the_bound_predicate(text):
