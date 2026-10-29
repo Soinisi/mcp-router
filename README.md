@@ -22,11 +22,13 @@ uv tool install .        # provides `mcp-router` (and `mcp-router-server`)
 ## Agent skill
 
 An agent skill that installs the router and registers servers lives at
-`skills/mcp-router/SKILL.md`. Link it into your skills directory to make it
-available globally:
+`skills/mcp-router/SKILL.md`. Link it into each client's skills directory to
+make it available globally (for example `~/.agents/skills` and
+`~/.claude/skills`):
 
 ```sh
 ln -s "$PWD/skills/mcp-router" ~/.agents/skills/mcp-router
+ln -s "$PWD/skills/mcp-router" ~/.claude/skills/mcp-router
 ```
 
 ## Configure
