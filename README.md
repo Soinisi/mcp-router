@@ -19,6 +19,16 @@ those operations never occupy an agent's context.
 uv tool install .        # provides `mcp-router` (and `mcp-router-server`)
 ```
 
+## Agent skill
+
+An agent skill that installs the router and registers servers lives at
+`skills/mcp-router/SKILL.md`. Link it into your skills directory to make it
+available globally:
+
+```sh
+ln -s "$PWD/skills/mcp-router" ~/.agents/skills/mcp-router
+```
+
 ## Configure
 
 `~/.config/mcp-router/config.yaml` (optionally overridden per project by

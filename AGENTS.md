@@ -31,6 +31,8 @@ tools for all other ("registered") servers behind it. See `CONTEXT.md`
 - Uses the **low-level** `mcp.server.lowlevel.Server`, not FastMCP, so child
   `CallToolResult`s (incl. `isError`) pass through verbatim. Failures are returned
   as `isError` results, never raised.
+- `skills/mcp-router/SKILL.md` is the user-facing install/register skill; it is
+  symlinked into the user skills directory, not loaded by the router.
 
 ## Gotchas
 
