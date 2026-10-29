@@ -93,7 +93,9 @@ The LLM tests require `opencode` on `PATH` with a configured provider and skip
 when it or the model is unavailable. A separate deterministic test
 (`tests/e2e/test_learn_remote.py`) exercises the Microsoft Learn remote path
 through the router without an LLM and needs network access to
-`learn.microsoft.com`.
+`learn.microsoft.com`. `tests/test_sse_transport.py` starts a local SSE server
+and drives it through the router, so the legacy `sse` transport is covered by
+the default suite.
 
 ## Connecting a client
 
