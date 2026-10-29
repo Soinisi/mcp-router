@@ -58,7 +58,8 @@ tools for all other ("registered") servers behind it. See `CONTEXT.md`
   `tests/e2e/hello_server.py`, and `tests/e2e/ticket_server.py`. Prompts are plain
   user goals; the ticket tests assert the server's JSON store. A deterministic
   `tests/e2e/test_learn_remote.py` covers the Microsoft Learn remote path without
-  an LLM.
+  an LLM. `tests/test_sse_transport.py` covers the legacy SSE transport with a
+  local FastMCP server and runs in the default suite.
 
 ## Agent skills
 

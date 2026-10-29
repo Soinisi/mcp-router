@@ -52,7 +52,10 @@ async def _connect(server: Server) -> AsyncIterator[tuple[Any, Any]]:
     if server.transport == "sse":
         from mcp.client.sse import sse_client
 
-        async with sse_client(server.url, headers=headers) as (read, write):
+        # sse_client defaults to a 5s connect timeout; match the session wait.
+        async with sse_client(
+            server.url, headers=headers, timeout=DEFAULT_TIMEOUT
+        ) as (read, write):
             yield read, write
         return
 
