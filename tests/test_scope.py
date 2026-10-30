@@ -9,6 +9,7 @@ import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import pytest
 import yaml
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -37,6 +38,7 @@ def _write_config(tmp_path: Path) -> Path:
                 "scopes": {
                     "alpha-only": {"alpha": None},
                     "echo-only": {"alpha": ["echo"]},
+                    "no-tools": {"alpha": []},
                 },
             }
         ),
@@ -119,6 +121,21 @@ async def test_no_scope_lists_everything(tmp_path: Path):
         tools = await session.call_tool("get_mcp_tools", {"mcp_name": "beta"})
         names = {item["name"] for item in json.loads(tools.content[0].text)}
         assert {"echo", "add"} <= names
+
+
+@pytest.mark.parametrize(
+    ("scope", "expected"),
+    [("alpha-only", 2), ("echo-only", 1), ("no-tools", 0)],
+)
+async def test_check_reports_scoped_tool_count(tmp_path: Path, scope: str, expected: int):
+    config = _write_config(tmp_path)
+    async with _router(config, scope) as session:
+        installed = await session.call_tool("get_installed_mcps", {"check": True})
+        assert installed.isError is False
+        summaries = json.loads(installed.content[0].text)
+        assert [(item["name"], item["tool_count"]) for item in summaries] == [
+            ("alpha", expected)
+        ]
 
 
 def test_unknown_scope_fails_startup(tmp_path: Path):

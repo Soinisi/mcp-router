@@ -159,6 +159,14 @@ def _require_tool_in_scope(mcp_name: str, mcp_tool: str) -> None:
         )
 
 
+def _filter_tools_by_scope(mcp_name: str, tools: list[types.Tool]) -> list[types.Tool]:
+    allowed = _scope_tools(mcp_name)
+    if allowed is None:
+        return tools
+    allowed_set = set(allowed)
+    return [tool for tool in tools if tool.name in allowed_set]
+
+
 @asynccontextmanager
 async def _lifespan(server: Server) -> AsyncIterator[dict[str, Any]]:
     global _manager, _scope
@@ -221,7 +229,9 @@ async def _get_installed_mcps(manager: SessionManager, arguments: dict[str, Any]
                 session = await manager.session(summary["name"])
                 result = await session.call(lambda s: s.list_tools())
                 summary["reachable"] = True
-                summary["tool_count"] = len(result.tools)
+                summary["tool_count"] = len(
+                    _filter_tools_by_scope(summary["name"], result.tools)
+                )
             except Exception as exc:  # noqa: BLE001
                 summary["reachable"] = False
                 summary["error"] = f"{type(exc).__name__}: {exc}"
@@ -238,10 +248,7 @@ async def _get_mcp_tools(manager: SessionManager, arguments: dict[str, Any]) -> 
     session = await manager.session(mcp_name)
     result = await session.call(lambda s: s.list_tools())
     tools = result.tools
-    allowed = _scope_tools(mcp_name)
-    if allowed is not None:
-        allowed_set = set(allowed)
-        tools = [t for t in tools if t.name in allowed_set]
+    tools = _filter_tools_by_scope(mcp_name, tools)
     if pattern is not None:
         tools = [t for t in tools if pattern.search(t.name)]
     payload = [t.model_dump(by_alias=True, exclude_none=True, mode="json") for t in tools]

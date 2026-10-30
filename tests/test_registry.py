@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+import yaml
 
 from mcp_router import config as config_mod
 from mcp_router.config import ConfigError, load_config
@@ -49,6 +50,36 @@ def test_remove(user_config):
     assert "fs" not in load_config(environ={}).config.mcp_servers
     with pytest.raises(ConfigError, match="not registered"):
         remove_server("fs")
+
+
+def test_remove_cascades_into_scopes(user_config):
+    user_config.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "mcp_servers": {
+                    "tickets": {"type": "local", "command": "a"},
+                    "docs": {"type": "local", "command": "b"},
+                },
+                "scopes": {
+                    "support": {"tickets": None},
+                    "mixed": {"tickets": ["get"], "docs": None},
+                    "docs-only": {"docs": []},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    affected = remove_server("tickets")
+
+    assert affected == ["mixed", "support"]
+    loaded = load_config(environ={})
+    assert set(loaded.config.mcp_servers) == {"docs"}
+    assert loaded.config.scopes == {
+        "mixed": {"docs": None},
+        "docs-only": {"docs": []},
+    }
 
 
 def test_project_override(tmp_path, monkeypatch):
