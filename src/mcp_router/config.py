@@ -187,8 +187,13 @@ def resolve_server(server: Server, environ: dict[str, str]) -> Server:
 
 def resolve_config(config: RouterConfig, environ: dict[str, str]) -> RouterConfig:
     """Return a copy of ``config`` with all secrets expanded (or raise)."""
+    servers = config.model_dump(exclude_none=True)["mcp_servers"]
     return parse_config(
-        {"version": config.version, "mcp_servers": _expand(config.model_dump(exclude_none=True)["mcp_servers"], environ)}
+        {
+            "version": config.version,
+            "mcp_servers": _expand(servers, environ),
+            "scopes": config.scopes,
+        }
     )
 
 

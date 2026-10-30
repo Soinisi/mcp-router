@@ -8,7 +8,7 @@ tools for all other ("registered") servers behind it. See `CONTEXT.md`
 
 - Everything runs through uv: `uv sync`, then `uv run <cmd>`.
 - Tests: `uv run pytest`. Single test: `uv run pytest tests/test_server.py::test_end_to_end_via_stdio`.
-- CLI: `uv run mcp-router {serve,list,tools,add,remove,validate}`; stdio server is `uv run mcp-router-server` (or `python -m mcp_router.server`).
+- CLI: `uv run mcp-router {serve,list,tools,scopes,add,remove,validate}`; stdio server is `uv run mcp-router-server` (or `python -m mcp_router.server`).
 - No linter/formatter/typecheck is configured. Do not invent one.
 
 ## Git and shipping
