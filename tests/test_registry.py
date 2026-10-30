@@ -82,6 +82,61 @@ def test_remove_cascades_into_scopes(user_config):
     }
 
 
+def test_remove_refuses_when_sibling_scope_references_server(
+    tmp_path, monkeypatch, user_config
+):
+    add_server("tickets", {"type": "local", "command": "a"})
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    project = project_dir / "mcp-router.yaml"
+    project.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "mcp_servers": {},
+                "scopes": {"support": {"tickets": None}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(project_dir)
+
+    with pytest.raises(ConfigError) as excinfo:
+        remove_server("tickets")
+
+    message = str(excinfo.value)
+    assert str(project) in message
+    assert "support" in message
+    assert "tickets" in load_config(environ={}).config.mcp_servers
+    assert "support" in yaml.safe_load(project.read_text(encoding="utf-8"))["scopes"]
+
+
+def test_remove_project_refuses_when_user_scope_references_server(
+    tmp_path, monkeypatch, user_config
+):
+    user_config.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "mcp_servers": {},
+                "scopes": {"support": {"tickets": None}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    add_server("tickets", {"type": "local", "command": "a"}, scope="project")
+
+    with pytest.raises(ConfigError) as excinfo:
+        remove_server("tickets", scope="project")
+
+    message = str(excinfo.value)
+    assert str(user_config) in message
+    assert "support" in message
+
+
 def test_project_override(tmp_path, monkeypatch):
     user = tmp_path / "user.yaml"
     monkeypatch.setenv("MCP_ROUTER_CONFIG", str(user))
