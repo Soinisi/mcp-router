@@ -12,6 +12,10 @@ rejects out-of-scope servers and tools.
 Semantics: `null` = all tools, a list = only those tools, `[]` = none, an absent
 server = hidden. No scope selected = unrestricted.
 
+Scopes merge across the user and project config files per server, the same way
+`mcp_servers` do: a project scope with the same name adds servers and overrides
+individual server entries, rather than replacing the whole scope.
+
 ## Consequences
 
 - It is a guardrail, not an authentication boundary: the scope comes from the
