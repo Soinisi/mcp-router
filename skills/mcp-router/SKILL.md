@@ -49,21 +49,38 @@ description: "What this server is for"
 `description` defaults to the server name. Do not parse another client's config
 format; translate it into this one.
 
-## 3. Secrets
+## 3. Restrict access (optional)
+
+A scope is a named allow-list of servers, and optionally of each server's tools.
+Select it with `MCP_ROUTER_SCOPE=<name>` (or `mcp-router serve --scope <name>`).
+
+```yaml
+scopes:
+  support:
+    tickets: null                  # all ticket tools
+  readonly:
+    filesystem: ["read_file", "list_directory"]
+```
+
+`null` = all tools, a list = only those tools, `[]` = none, an absent server =
+hidden. With no scope selected, everything is reachable. `mcp-router scopes`
+prints the matrix. A scope is a guardrail, not authentication.
+
+## 4. Secrets
 
 `${VAR}` stays literal until a connection is made, then resolves from the
 process environment plus a `.env` file next to the config (or `.env` in the
 current directory). Real environment variables win. Run `mcp-router validate`
 to check for unresolved secrets.
 
-## 4. Check it
+## 5. Check it
 
 ```sh
 mcp-router validate
 mcp-router list
 ```
 
-## 5. Connect the client
+## 6. Connect the client
 
 Register the router as the only MCP server:
 
@@ -72,7 +89,8 @@ Register the router as the only MCP server:
 ```
 
 For opencode, use an `mcp` entry with `type: "local"` and
-`command: ["mcp-router", "serve"]`.
+`command: ["mcp-router", "serve"]`. To restrict the view, add
+`MCP_ROUTER_SCOPE` to the entry's environment.
 
 ## Gotchas
 

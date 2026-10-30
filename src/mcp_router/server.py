@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
@@ -108,6 +109,8 @@ _TOOLS: list[types.Tool] = [
 
 _manager: SessionManager | None = None
 _timeout: float = DEFAULT_TIMEOUT
+_scope_name: str | None = None
+_scope: dict[str, list[str] | None] | None = None
 
 
 def _text(content: str) -> types.CallToolResult:
@@ -129,21 +132,51 @@ def _compile_filter(pattern: str | None) -> re.Pattern[str] | None:
         raise ValueError(f"Invalid regex_filter {pattern!r}: {exc}") from exc
 
 
+def _active_scope_label() -> str:
+    return _scope_name or os.environ.get("MCP_ROUTER_SCOPE") or "<unknown>"
+
+
+def _require_server_in_scope(mcp_name: str) -> None:
+    if _scope is not None and mcp_name not in _scope:
+        raise ConfigError(
+            f"Server {mcp_name!r} is not available in scope "
+            f"{_active_scope_label()!r}."
+        )
+
+
+def _scope_tools(mcp_name: str) -> list[str] | None:
+    if _scope is None:
+        return None
+    return _scope.get(mcp_name)
+
+
+def _require_tool_in_scope(mcp_name: str, mcp_tool: str) -> None:
+    allowed = _scope_tools(mcp_name)
+    if allowed is not None and mcp_tool not in allowed:
+        raise ConfigError(
+            f"Tool {mcp_tool!r} is not available on server {mcp_name!r} in scope "
+            f"{_active_scope_label()!r}."
+        )
+
+
 @asynccontextmanager
 async def _lifespan(server: Server) -> AsyncIterator[dict[str, Any]]:
-    global _manager
+    global _manager, _scope
     loaded = load_config()
     if not loaded.sources:
         raise ConfigError(
             "No router config found. Create one with `mcp-router add` or at "
             "~/.config/mcp-router/config.yaml."
         )
+    active_scope = _scope_name if _scope_name is not None else os.environ.get("MCP_ROUTER_SCOPE")
+    _scope = loaded.config.resolve_scope(active_scope)
     _manager = SessionManager(loaded.config, environ=loaded.environ, timeout=_timeout)
     try:
-        yield {"config": loaded.config, "manager": _manager}
+        yield {"config": loaded.config, "manager": _manager, "scope": _scope}
     finally:
         await _manager.aclose()
         _manager = None
+        _scope = None
 
 
 def build_server() -> Server:
@@ -177,6 +210,8 @@ async def _get_installed_mcps(manager: SessionManager, arguments: dict[str, Any]
     pattern = _compile_filter(arguments.get("regex_filter"))
     check = bool(arguments.get("check", False))
     summaries = server_summaries(manager.config)
+    if _scope is not None:
+        summaries = [s for s in summaries if s["name"] in _scope]
     if pattern is not None:
         summaries = [s for s in summaries if pattern.search(s["name"])]
 
@@ -198,10 +233,15 @@ async def _get_mcp_tools(manager: SessionManager, arguments: dict[str, Any]) -> 
     mcp_name = arguments.get("mcp_name")
     if not mcp_name:
         return _error("mcp_name is required.")
+    _require_server_in_scope(mcp_name)
     pattern = _compile_filter(arguments.get("regex_filter"))
     session = await manager.session(mcp_name)
     result = await session.call(lambda s: s.list_tools())
     tools = result.tools
+    allowed = _scope_tools(mcp_name)
+    if allowed is not None:
+        allowed_set = set(allowed)
+        tools = [t for t in tools if t.name in allowed_set]
     if pattern is not None:
         tools = [t for t in tools if pattern.search(t.name)]
     payload = [t.model_dump(by_alias=True, exclude_none=True, mode="json") for t in tools]
@@ -213,6 +253,8 @@ async def _run_mcp_tool(manager: SessionManager, arguments: dict[str, Any]) -> t
     mcp_tool = arguments.get("mcp_tool")
     if not mcp_name or not mcp_tool:
         return _error("mcp_name and mcp_tool are required.")
+    _require_server_in_scope(mcp_name)
+    _require_tool_in_scope(mcp_name, mcp_tool)
     tool_args = arguments.get("arguments") or {}
     if not isinstance(tool_args, dict):
         return _error("arguments must be an object.")
@@ -220,9 +262,10 @@ async def _run_mcp_tool(manager: SessionManager, arguments: dict[str, Any]) -> t
     return await session.call(lambda s: s.call_tool(mcp_tool, arguments=tool_args))
 
 
-async def run_server(timeout: float = DEFAULT_TIMEOUT) -> None:
-    global _timeout
+async def run_server(timeout: float = DEFAULT_TIMEOUT, scope: str | None = None) -> None:
+    global _timeout, _scope_name
     _timeout = timeout
+    _scope_name = scope
     server = build_server()
     async with stdio_server() as (read, write):
         await server.run(read, write, server.create_initialization_options())
