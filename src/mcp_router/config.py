@@ -231,7 +231,12 @@ def load_config(
     paths: list[Path] | None = None,
     environ: dict[str, str] | None = None,
 ) -> LoadedConfig:
-    """Load and merge config files; later files override earlier ones per server."""
+    """Load and merge config files.
+
+    Servers from later files override earlier ones by name. Scopes merge per
+    scope name and per server, so a project scope adds to the user-level scope
+    and overrides only the server entries it names.
+    """
     if paths is None:
         paths = [global_config_path(), project_config_path()]
 

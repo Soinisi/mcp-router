@@ -89,6 +89,9 @@ scopes:
 - a server absent from the scope — hidden and not callable.
 - `mcp-router scopes` prints the matrix.
 
+A scope may only name registered servers, and serving with an undefined scope
+name fails at startup.
+
 Scopes merge across config files per server, like `mcp_servers`: a project scope
 with the same name adds servers to the user-level scope and overrides the entry
 for any server it names.
@@ -110,6 +113,11 @@ mcp-router remove filesystem [--project]
 
 `add` takes **our** spec (a single server mapping); it does not parse VS Code or
 any other client's format.
+
+`remove` also drops the server from scopes in the config file it edits. If the
+other config file's scopes still name the server and that file does not define
+it, `remove` refuses and names the file and scope(s) rather than leaving a
+dangling reference.
 
 ## End-to-end tests
 

@@ -34,9 +34,10 @@ _TOOLS: list[types.Tool] = [
     types.Tool(
         name="get_installed_mcps",
         description=(
-            "List the MCP servers registered with this router, optionally "
-            "filtered by a regular expression over their names. Call this first "
-            "to discover what is available. Returns each server's name, "
+            "List the MCP servers available to this connection (all registered "
+            "servers, or the active scope's subset), optionally filtered by a "
+            "regular expression over their names. Call this first to discover "
+            "what is available. Returns each server's name, "
             "description and type. Set check=true to also connect and report "
             "reachability and tool counts."
         ),
@@ -59,9 +60,10 @@ _TOOLS: list[types.Tool] = [
     types.Tool(
         name="get_mcp_tools",
         description=(
-            "List the tools exposed by a single registered server, as that "
-            "server would return them from tools/list (name, description and "
-            "inputSchema). Call this after get_installed_mcps and before "
+            "List the tools exposed by a single registered server that the "
+            "active scope allows, as that server would return them from "
+            "tools/list (name, description and inputSchema). Call this after "
+            "get_installed_mcps and before "
             "run_mcp_tool so you know how to build the arguments."
         ),
         inputSchema={
@@ -82,7 +84,8 @@ _TOOLS: list[types.Tool] = [
     types.Tool(
         name="run_mcp_tool",
         description=(
-            "Invoke a tool on a registered server. Pass mcp_name and mcp_tool "
+            "Invoke a tool on a registered server, if the active scope allows "
+            "it. Pass mcp_name and mcp_tool "
             "from the previous steps, and arguments matching that tool's "
             "inputSchema. Returns the server's result verbatim."
         ),
