@@ -89,6 +89,10 @@ scopes:
 - a server absent from the scope — hidden and not callable.
 - `mcp-router scopes` prints the matrix.
 
+Scopes merge across config files per server, like `mcp_servers`: a project scope
+with the same name adds servers to the user-level scope and overrides the entry
+for any server it names.
+
 A scope is a guardrail selected by the launching client's environment, not an
 authentication boundary.
 

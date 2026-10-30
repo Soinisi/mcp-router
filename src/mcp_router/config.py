@@ -250,7 +250,12 @@ def load_config(
         scopes = data.get("scopes", {})
         if not isinstance(scopes, dict):
             raise ConfigError(f"'scopes' must be a mapping in {path}.")
-        merged["scopes"].update(scopes)
+        for scope_name, scope in scopes.items():
+            if not isinstance(scope, dict):
+                raise ConfigError(
+                    f"scope {scope_name!r} must be a mapping in {path}."
+                )
+            merged["scopes"].setdefault(scope_name, {}).update(scope)
 
     env_files = [p.parent / ".env" for p in existing]
     env_files.append(Path.cwd() / ".env")
