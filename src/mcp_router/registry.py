@@ -97,18 +97,20 @@ def remove_server(name: str, scope: str = "user") -> list[str]:
 
     sibling = resolve_scope("project" if scope == "user" else "user")
     if sibling.resolve() != path.resolve() and sibling.is_file():
-        sibling_scopes = _load_raw(sibling).get("scopes")
-        if isinstance(sibling_scopes, dict):
-            conflicts = sorted(
-                scope_name
-                for scope_name, entries in sibling_scopes.items()
-                if isinstance(entries, dict) and name in entries
-            )
-            if conflicts:
-                raise ConfigError(
-                    f"Cannot remove {name!r}: scopes in {sibling} still reference it "
-                    f"({', '.join(conflicts)}). Remove {name!r} from those scopes first."
+        sibling_data = _load_raw(sibling)
+        if name not in sibling_data["mcp_servers"]:
+            sibling_scopes = sibling_data.get("scopes")
+            if isinstance(sibling_scopes, dict):
+                conflicts = sorted(
+                    scope_name
+                    for scope_name, entries in sibling_scopes.items()
+                    if isinstance(entries, dict) and name in entries
                 )
+                if conflicts:
+                    raise ConfigError(
+                        f"Cannot remove {name!r}: scopes in {sibling} still reference it "
+                        f"({', '.join(conflicts)}). Remove {name!r} from those scopes first."
+                    )
 
     del servers[name]
 
