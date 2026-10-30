@@ -163,10 +163,13 @@ def remove(
     """Remove a registered server."""
     scope = "project" if project else "user"
     try:
-        remove_server(mcp_name, scope=scope)
+        affected = remove_server(mcp_name, scope=scope)
     except ConfigError as exc:
         _fail(str(exc))
-    typer.secho(f"Removed {mcp_name!r} from {resolve_scope(scope)}.", fg=typer.colors.GREEN)
+    message = f"Removed {mcp_name!r} from {resolve_scope(scope)}."
+    if affected:
+        message += f" Updated scopes: {', '.join(affected)}."
+    typer.secho(message, fg=typer.colors.GREEN)
 
 
 def _read_spec(file: Optional[Path]) -> dict:

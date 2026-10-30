@@ -88,14 +88,30 @@ def add_server(
     return server
 
 
-def remove_server(name: str, scope: str = "user") -> None:
+def remove_server(name: str, scope: str = "user") -> list[str]:
     path = resolve_scope(scope)
     data = _load_raw(path)
     servers: dict[str, Any] = data["mcp_servers"]
     if name not in servers:
         raise ConfigError(f"Server {name!r} is not registered in {path}.")
     del servers[name]
+
+    affected: list[str] = []
+    scopes = data.get("scopes")
+    if isinstance(scopes, dict):
+        for scope_name in list(scopes):
+            entries = scopes[scope_name]
+            if not isinstance(entries, dict) or name not in entries:
+                continue
+            del entries[name]
+            affected.append(scope_name)
+            if not entries:
+                del scopes[scope_name]
+        if not scopes:
+            data.pop("scopes", None)
+
     _write_raw(path, data)
+    return sorted(affected)
 
 
 def server_summaries(config: RouterConfig) -> list[dict[str, Any]]:
