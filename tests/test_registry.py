@@ -137,6 +137,55 @@ def test_remove_project_refuses_when_user_scope_references_server(
     assert "support" in message
 
 
+def test_remove_project_allows_when_user_still_defines_server(
+    tmp_path, monkeypatch, user_config
+):
+    user_config.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "mcp_servers": {"tickets": {"type": "local", "command": "user"}},
+                "scopes": {"support": {"tickets": None}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    add_server("tickets", {"type": "local", "command": "project"}, scope="project")
+
+    assert remove_server("tickets", scope="project") == []
+    loaded = load_config(environ={})
+    assert loaded.config.mcp_servers["tickets"].command == "user"
+    assert loaded.config.scopes["support"]["tickets"] is None
+
+
+def test_remove_user_allows_when_project_still_defines_server(
+    tmp_path, monkeypatch, user_config
+):
+    add_server("tickets", {"type": "local", "command": "user"})
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    project = project_dir / "mcp-router.yaml"
+    project.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "mcp_servers": {"tickets": {"type": "local", "command": "project"}},
+                "scopes": {"support": {"tickets": None}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(project_dir)
+
+    assert remove_server("tickets") == []
+    loaded = load_config(environ={})
+    assert loaded.config.mcp_servers["tickets"].command == "project"
+    assert loaded.config.scopes["support"]["tickets"] is None
+
+
 def test_project_override(tmp_path, monkeypatch):
     user = tmp_path / "user.yaml"
     monkeypatch.setenv("MCP_ROUTER_CONFIG", str(user))
