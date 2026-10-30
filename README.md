@@ -69,13 +69,37 @@ next to the config (or in the current directory). Real environment variables
 win over `.env`. An unresolved variable is a hard error — the router never
 sends a literal `${VAR}` to a child.
 
+### Scopes
+
+A scope is a named, per-connection allow-list of servers and, optionally, tools.
+Select one with `MCP_ROUTER_SCOPE=<name>` (or `mcp-router serve --scope <name>`).
+With no scope selected, every registered server is reachable.
+
+```yaml
+scopes:
+  support:
+    tickets: null                  # all ticket tools
+  readonly:
+    filesystem: ["read_file", "list_directory"]
+```
+
+- `null` — the server is visible with all its tools.
+- a list — only those tools are listed and callable.
+- an empty list — the server is visible with no tools.
+- a server absent from the scope — hidden and not callable.
+- `mcp-router scopes` prints the matrix.
+
+A scope is a guardrail selected by the launching client's environment, not an
+authentication boundary.
+
 ## CLI
 
 ```sh
 mcp-router list                 # registered servers, one per line
 mcp-router tools filesystem     # the tools one server exposes
 mcp-router validate             # validate the config
-mcp-router serve                # run as an MCP server over stdio
+mcp-router scopes               # list scopes and their allow-lists
+mcp-router serve [--scope NAME] # run as an MCP server over stdio
 mcp-router add filesystem -f spec.yaml [--project] [--overwrite]
 mcp-router remove filesystem [--project]
 ```

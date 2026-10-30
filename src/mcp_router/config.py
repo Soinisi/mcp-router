@@ -15,7 +15,7 @@ from typing import Annotated, Any, Literal, Union
 
 import yaml
 from dotenv import dotenv_values
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from pydantic import TypeAdapter
 
 ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
@@ -60,9 +60,40 @@ class RouterConfig(BaseModel):
 
     version: Literal[1] = 1
     mcp_servers: dict[str, Server] = Field(default_factory=dict)
+    # scope name -> {server name -> allowed tools}; None means every tool.
+    scopes: dict[str, dict[str, list[str] | None]] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_scopes(self) -> "RouterConfig":
+        for scope_name, scope in self.scopes.items():
+            unknown = set(scope) - set(self.mcp_servers)
+            if unknown:
+                raise ValueError(
+                    f"scope {scope_name!r} references unknown server(s): "
+                    f"{', '.join(sorted(unknown))}"
+                )
+            for server_name, tools in scope.items():
+                if tools is None:
+                    continue
+                cleaned = [tool.strip() for tool in tools]
+                if any(not tool for tool in cleaned):
+                    raise ValueError(
+                        f"scope {scope_name!r}.{server_name!r} has an empty tool name"
+                    )
+                scope[server_name] = list(dict.fromkeys(cleaned))
+        return self
 
     def names(self) -> list[str]:
         return sorted(self.mcp_servers)
+
+    def resolve_scope(self, name: str | None) -> dict[str, list[str] | None] | None:
+        """Return the named scope, or ``None`` for the unrestricted view."""
+        if not name:
+            return None
+        if name not in self.scopes:
+            known = ", ".join(sorted(self.scopes)) or "<none>"
+            raise ConfigError(f"Unknown scope {name!r}. Defined scopes: {known}.")
+        return self.scopes[name]
 
 
 _CONFIG_ADAPTER = TypeAdapter(RouterConfig)
@@ -206,7 +237,7 @@ def load_config(
 
     existing = [p for p in paths if p.is_file()]
 
-    merged: dict[str, Any] = {"version": 1, "mcp_servers": {}}
+    merged: dict[str, Any] = {"version": 1, "mcp_servers": {}, "scopes": {}}
     for path in existing:
         data = _read_yaml(path)
         version = data.get("version", 1)
@@ -216,6 +247,10 @@ def load_config(
         if not isinstance(servers, dict):
             raise ConfigError(f"'mcp_servers' must be a mapping in {path}.")
         merged["mcp_servers"].update(servers)
+        scopes = data.get("scopes", {})
+        if not isinstance(scopes, dict):
+            raise ConfigError(f"'scopes' must be a mapping in {path}.")
+        merged["scopes"].update(scopes)
 
     env_files = [p.parent / ".env" for p in existing]
     env_files.append(Path.cwd() / ".env")
@@ -227,7 +262,10 @@ def load_config(
 
 def dump_config(config: RouterConfig) -> str:
     """Serialise a config back to YAML (secrets are stored as ``${VAR}``)."""
-    data = config.model_dump(exclude_defaults=False, exclude_none=True)
-    data.pop("version", None)
-    payload = {"version": config.version, "mcp_servers": data.get("mcp_servers", {})}
+    payload: dict[str, Any] = {
+        "version": config.version,
+        "mcp_servers": config.model_dump(exclude_none=True)["mcp_servers"],
+    }
+    if config.scopes:
+        payload["scopes"] = config.scopes
     return yaml.safe_dump(payload, sort_keys=True, default_flow_style=False)

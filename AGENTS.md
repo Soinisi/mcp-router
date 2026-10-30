@@ -33,6 +33,9 @@ tools for all other ("registered") servers behind it. See `CONTEXT.md`
   as `isError` results, never raised.
 - `skills/mcp-router/SKILL.md` is the user-facing install/register skill; it is
   symlinked into the user skills directory, not loaded by the router.
+- `scopes` in the config are selected by `MCP_ROUTER_SCOPE` / `serve --scope`;
+  the three tool handlers in `server.py` filter discovery and reject
+  out-of-scope calls (ADR 0002).
 
 ## Gotchas
 

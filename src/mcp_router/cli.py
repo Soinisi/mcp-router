@@ -47,12 +47,40 @@ def _load_or_fail() -> LoadedConfig:
 
 
 @app.command()
-def serve() -> None:
+def serve(
+    scope: Optional[str] = typer.Option(
+        None, "--scope", help="Restrict this connection to a named scope."
+    ),
+) -> None:
     """Run the router as an MCP server over stdio (validates config on startup)."""
     try:
-        asyncio.run(run_server())
+        asyncio.run(run_server(scope=scope))
     except ConfigError as exc:
         _fail(str(exc))
+
+
+@app.command()
+def scopes() -> None:
+    """List the configured scopes and their server/tool allow-lists."""
+    loaded = _load_or_fail()
+    if not loaded.config.scopes:
+        typer.echo("No scopes defined.")
+        return
+    for name in sorted(loaded.config.scopes):
+        typer.echo(name)
+        entries = loaded.config.scopes[name]
+        if not entries:
+            typer.echo("  (no servers)")
+            continue
+        for server in sorted(entries):
+            tools = entries[server]
+            if tools is None:
+                shown = "all tools"
+            elif tools:
+                shown = ", ".join(tools)
+            else:
+                shown = "no tools"
+            typer.echo(f"  {server}: {shown}")
 
 
 @app.command("list")

@@ -87,3 +87,49 @@ def test_build_environ_real_env_wins(tmp_path):
     env = build_environ([env_file], base={"B": "from_process"})
     assert env["A"] == "from_file"
     assert env["B"] == "from_process"
+
+
+def test_scopes_parse_and_resolve():
+    config = parse_config(
+        {
+            "mcp_servers": {"tickets": {"type": "local", "command": "true"}},
+            "scopes": {
+                "support": {"tickets": None},
+                "readonly": {"tickets": ["get_ticket"]},
+            },
+        }
+    )
+    assert config.resolve_scope("support") == {"tickets": None}
+    assert config.resolve_scope("readonly") == {"tickets": ["get_ticket"]}
+    assert config.resolve_scope(None) is None
+
+
+def test_scope_unknown_server_rejected():
+    with pytest.raises(ConfigError, match="unknown server"):
+        parse_config({"mcp_servers": {}, "scopes": {"x": {"ghost": None}}})
+
+
+def test_scope_empty_tool_name_rejected():
+    with pytest.raises(ConfigError, match="empty tool name"):
+        parse_config(
+            {
+                "mcp_servers": {"t": {"type": "local", "command": "true"}},
+                "scopes": {"x": {"t": [" "]}},
+            }
+        )
+
+
+def test_scope_empty_tool_list_means_no_tools():
+    config = parse_config(
+        {
+            "mcp_servers": {"t": {"type": "local", "command": "true"}},
+            "scopes": {"x": {"t": []}},
+        }
+    )
+    assert config.resolve_scope("x") == {"t": []}
+
+
+def test_unknown_scope_raises():
+    config = parse_config({"mcp_servers": {}})
+    with pytest.raises(ConfigError, match="Unknown scope"):
+        config.resolve_scope("ghost")
