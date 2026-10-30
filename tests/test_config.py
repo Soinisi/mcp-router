@@ -9,6 +9,7 @@ from mcp_router.config import (
     build_environ,
     load_config,
     parse_config,
+    resolve_config,
     resolve_server,
     unresolved_secrets,
 )
@@ -103,6 +104,18 @@ def test_scopes_parse_and_resolve():
     assert config.resolve_scope("support") == {"tickets": None}
     assert config.resolve_scope("readonly") == {"tickets": ["get_ticket"]}
     assert config.resolve_scope(None) is None
+
+
+def test_resolve_config_preserves_scopes():
+    config = parse_config(
+        {
+            "mcp_servers": {"tickets": {"type": "local", "command": "true"}},
+            "scopes": {"support": {"tickets": None}},
+        }
+    )
+    resolved = resolve_config(config, {})
+    assert resolved.scopes == {"support": {"tickets": None}}
+    assert resolved.resolve_scope("support") == {"tickets": None}
 
 
 def test_scope_unknown_server_rejected():

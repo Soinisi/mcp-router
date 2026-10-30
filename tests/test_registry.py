@@ -127,10 +127,10 @@ def test_remove_project_refuses_when_user_scope_references_server(
     project_dir = tmp_path / "proj"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    add_server("tickets", {"type": "local", "command": "a"}, scope="project")
+    add_server("tickets", {"type": "local", "command": "a"}, target="project")
 
     with pytest.raises(ConfigError) as excinfo:
-        remove_server("tickets", scope="project")
+        remove_server("tickets", target="project")
 
     message = str(excinfo.value)
     assert str(user_config) in message
@@ -153,9 +153,9 @@ def test_remove_project_allows_when_user_still_defines_server(
     project_dir = tmp_path / "proj"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    add_server("tickets", {"type": "local", "command": "project"}, scope="project")
+    add_server("tickets", {"type": "local", "command": "project"}, target="project")
 
-    assert remove_server("tickets", scope="project") == []
+    assert remove_server("tickets", target="project") == []
     loaded = load_config(environ={})
     assert loaded.config.mcp_servers["tickets"].command == "user"
     assert loaded.config.scopes["support"]["tickets"] is None
@@ -194,7 +194,7 @@ def test_project_override(tmp_path, monkeypatch):
     project_dir = tmp_path / "proj"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    add_server("fs", {"type": "local", "command": "local"}, scope="project")
+    add_server("fs", {"type": "local", "command": "local"}, target="project")
 
     loaded = load_config(environ={})
     assert loaded.config.mcp_servers["fs"].command == "local"

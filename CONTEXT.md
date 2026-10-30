@@ -40,3 +40,7 @@ _Avoid_: env substitution, interpolation
 **Scope**:
 A named, per-connection allow-list of registered servers and optionally their tools.
 _Avoid_: profile, role, permission set
+
+**Config target**:
+Which config file a CLI mutation writes: the user config or the project's `./mcp-router.yaml`.
+_Avoid_: scope, level

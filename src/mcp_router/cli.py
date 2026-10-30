@@ -23,7 +23,7 @@ from .config import (
     project_config_path,
     unresolved_secrets,
 )
-from .registry import add_server, remove_server, resolve_scope, server_summaries
+from .registry import add_server, remove_server, resolve_target, server_summaries
 from .sessions import SessionManager
 from .server import run_server
 
@@ -147,12 +147,12 @@ def add(
 ) -> None:
     """Register a server from our spec (single entry, not a foreign format)."""
     spec = _read_spec(file)
-    scope = "project" if project else "user"
+    target = "project" if project else "user"
     try:
-        add_server(mcp_name, spec, scope=scope, overwrite=overwrite)
+        add_server(mcp_name, spec, target=target, overwrite=overwrite)
     except ConfigError as exc:
         _fail(str(exc))
-    typer.secho(f"Added {mcp_name!r} to {resolve_scope(scope)}.", fg=typer.colors.GREEN)
+    typer.secho(f"Added {mcp_name!r} to {resolve_target(target)}.", fg=typer.colors.GREEN)
 
 
 @app.command()
@@ -161,12 +161,12 @@ def remove(
     project: bool = typer.Option(False, "--project", help="Remove from ./mcp-router.yaml."),
 ) -> None:
     """Remove a registered server."""
-    scope = "project" if project else "user"
+    target = "project" if project else "user"
     try:
-        affected = remove_server(mcp_name, scope=scope)
+        affected = remove_server(mcp_name, target=target)
     except ConfigError as exc:
         _fail(str(exc))
-    message = f"Removed {mcp_name!r} from {resolve_scope(scope)}."
+    message = f"Removed {mcp_name!r} from {resolve_target(target)}."
     if affected:
         message += f" Updated scopes: {', '.join(affected)}."
     typer.secho(message, fg=typer.colors.GREEN)

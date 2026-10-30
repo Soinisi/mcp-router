@@ -25,12 +25,12 @@ from .config import (
 _SERVER_ADAPTER = TypeAdapter(Server)
 
 
-def resolve_scope(scope: str) -> Path:
-    if scope == "user":
+def resolve_target(target: str) -> Path:
+    if target == "user":
         return global_config_path()
-    if scope == "project":
+    if target == "project":
         return project_config_path()
-    raise ConfigError(f"Unknown scope {scope!r} (expected 'user' or 'project').")
+    raise ConfigError(f"Unknown target {target!r} (expected 'user' or 'project').")
 
 
 def validate_server(spec: dict[str, Any]) -> Server:
@@ -67,14 +67,14 @@ def _write_raw(path: Path, data: dict[str, Any]) -> None:
 def add_server(
     name: str,
     spec: dict[str, Any],
-    scope: str = "user",
+    target: str = "user",
     overwrite: bool = False,
 ) -> Server:
     if not name.strip():
         raise ConfigError("Server name must not be empty.")
     server = validate_server(spec)
 
-    path = resolve_scope(scope)
+    path = resolve_target(target)
     data = _load_raw(path)
     servers: dict[str, Any] = data["mcp_servers"]
 
@@ -88,14 +88,14 @@ def add_server(
     return server
 
 
-def remove_server(name: str, scope: str = "user") -> list[str]:
-    path = resolve_scope(scope)
+def remove_server(name: str, target: str = "user") -> list[str]:
+    path = resolve_target(target)
     data = _load_raw(path)
     servers: dict[str, Any] = data["mcp_servers"]
     if name not in servers:
         raise ConfigError(f"Server {name!r} is not registered in {path}.")
 
-    sibling = resolve_scope("project" if scope == "user" else "user")
+    sibling = resolve_target("project" if target == "user" else "user")
     if sibling.resolve() != path.resolve() and sibling.is_file():
         sibling_data = _load_raw(sibling)
         if name not in sibling_data["mcp_servers"]:
@@ -142,7 +142,7 @@ def server_summaries(config: RouterConfig) -> list[dict[str, Any]]:
 __all__ = [
     "add_server",
     "remove_server",
-    "resolve_scope",
+    "resolve_target",
     "server_summaries",
     "validate_server",
     "dump_config",
