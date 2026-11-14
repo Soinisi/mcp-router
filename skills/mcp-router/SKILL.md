@@ -97,5 +97,5 @@ For opencode, use an `mcp` entry with `type: "local"` and
 - Config: `~/.config/mcp-router/config.yaml`, or `$MCP_ROUTER_CONFIG`; a
   `./mcp-router.yaml` overrides it per project.
 - `add` and `remove` are CLI-only; the MCP surface is read/run only.
-- The MCP tool surface is exactly `get_installed_mcps`, `get_mcp_tools`, and
+- The MCP tool surface is exactly `get_installed_mcps`, `search_tools`, and
   `run_mcp_tool`.

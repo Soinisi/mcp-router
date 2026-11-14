@@ -60,7 +60,7 @@ async def test_microsoft_learn_through_router(tmp_path: Path):
             assert "microsoftdocs" in installed.content[0].text
 
             tools = await session.call_tool(
-                "get_mcp_tools", {"mcp_name": "microsoftdocs"}
+                "search_tools", {"mcp_name": "microsoftdocs"}
             )
             assert tools.isError is False
             names = {item["name"] for item in json.loads(tools.content[0].text)}

@@ -80,7 +80,7 @@ async def test_remote_sse_server_through_router(tmp_path: Path):
                 assert installed.isError is False
                 assert "sse" in installed.content[0].text
 
-                tools = await session.call_tool("get_mcp_tools", {"mcp_name": "sse"})
+                tools = await session.call_tool("search_tools", {"mcp_name": "sse"})
                 assert tools.isError is False
                 names = {item["name"] for item in json.loads(tools.content[0].text)}
                 assert "echo" in names
