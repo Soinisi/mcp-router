@@ -21,8 +21,9 @@ tools and reaches everything else through them:
 
 v2.0 collapses discovery into `search_tools` so the common path is
 `search_tools` → `run_mcp_tool` instead of one round trip per step. A filter
-that matches a server name or description narrows the scan to that server; use a
-tool keyword to search all servers. The three-tool surface is unchanged.
+that matches a server name or description narrows the scan to that server and
+returns its catalog; use a tool keyword to search all servers. The three-tool
+surface is unchanged.
 
 Adding and removing servers is done from the CLI, never through the agent, so
 those operations never occupy an agent's context.
@@ -236,7 +237,7 @@ router = S × 3 × P + R × Q                 # three router tools + discovery r
 ```
 
 `P` is the token cost of one tool definition, `R` the number of discovery round
-trips needed to find the target server, and `Q` the cost of one round trip (an
+trips needed to find the target tool, and `Q` the cost of one round trip (an
 extra model step re-sending the base prompt plus the discovery output). Setting
 the two costs equal gives the break-even tool count:
 

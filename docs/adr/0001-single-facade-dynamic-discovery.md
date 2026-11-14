@@ -33,7 +33,7 @@ Two consequences of that shape are deliberate and easy to "fix" wrongly:
   direct connection, so results are faithful, not literally identical.
 - `search_tools` may search across every scope-visible server when `mcp_name` is
   omitted, so discovery can be one round trip. A filter that matches a server
-  name narrows the scan to that server, a broad result is capped, and a partial
-  scan reports its `unreachable_servers`.
+  name or description narrows the scan to that server, a broad result is capped,
+  and a partial scan reports its `unreachable_servers`.
 - Secrets resolve at connect time from the environment and `.env`, so listing
   servers never requires the secrets — only using a server does.

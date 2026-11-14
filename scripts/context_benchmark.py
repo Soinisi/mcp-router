@@ -165,7 +165,7 @@ class RoutingEstimate:
         direct(M) = steps * M * tokens_per_tool
 
     The router re-sends only its three discovery tools, and pays a fixed cost
-    for each round trip needed to find the target server::
+    for each round trip needed to find the target tool::
 
         router(M) = steps * router_tools * tokens_per_tool
                     + discovery_round_trips * discovery_tokens_per_round_trip
