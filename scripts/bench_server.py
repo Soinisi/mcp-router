@@ -19,6 +19,14 @@ from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 
 DOMAINS: dict[str, dict[str, Any]] = {
+    "postgres": {
+        "product": "PostgreSQL",
+        "resources": [
+            ("database", "databases", "the database name"),
+            ("table", "tables", "the schema-qualified table name"),
+            ("row", "rows", "the primary key"),
+        ],
+    },
     "github": {
         "product": "GitHub",
         "resources": [
@@ -33,14 +41,6 @@ DOMAINS: dict[str, dict[str, Any]] = {
             ("channel", "channels", "the channel ID"),
             ("message", "messages", "the message timestamp"),
             ("user", "users", "the user ID"),
-        ],
-    },
-    "postgres": {
-        "product": "PostgreSQL",
-        "resources": [
-            ("database", "databases", "the database name"),
-            ("table", "tables", "the schema-qualified table name"),
-            ("row", "rows", "the primary key"),
         ],
     },
     "sentry": {
@@ -100,6 +100,19 @@ DOMAINS: dict[str, dict[str, Any]] = {
         ],
     },
 }
+
+
+#: The end-to-end benchmark asks for this tool, which exists only on the
+#: postgres domain. postgres is first so the target server is present for every N.
+TARGET_DOMAIN = "postgres"
+TARGET_TOOL = "list_databases"
+TARGET_OUTPUT_MARKER = "analytics"
+
+_DATABASES = [
+    {"name": "analytics", "owner": "data-team", "size_gb": 128},
+    {"name": "billing", "owner": "finance", "size_gb": 42},
+    {"name": "warehouse", "owner": "data-team", "size_gb": 512},
+]
 
 
 def _schema(properties: dict[str, Any], required: list[str] | None = None) -> dict[str, Any]:
@@ -201,7 +214,10 @@ def build_server(domain: str) -> Server:
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict[str, Any] | None) -> types.CallToolResult:
-        payload = {"tool": name, "arguments": arguments or {}, "ok": True}
+        if name == TARGET_TOOL:
+            payload: Any = {"databases": _DATABASES}
+        else:
+            payload = {"tool": name, "arguments": arguments or {}, "ok": True}
         return types.CallToolResult(
             content=[types.TextContent(type="text", text=json.dumps(payload))]
         )

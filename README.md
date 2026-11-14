@@ -149,28 +149,61 @@ the default suite.
 
 ## Context-savings benchmark
 
-`scripts/context_benchmark.py` measures what the router actually saves: it drives
-a real `opencode` session twice for several server counts N, once with opencode
-connected directly to N synthetic local MCP servers and once through
-`mcp-router`, then reads the input-token count of the first model step from
-opencode's JSON event stream. The synthetic servers expose realistic tool
-definitions with names, descriptions and inputSchemas; Code Mode is turned off
-so both configurations place the tools on the provider's native tool list.
+`scripts/context_benchmark.py` measures what the router actually saves by
+driving a real `opencode` agent against N synthetic local MCP servers in two
+configurations: **direct** (opencode registers all N servers) and **router**
+(opencode registers only `mcp-router`, which fronts the same N). It reports two
+measurements:
+
+- **Registration-only** — a fixed `reply ok` prompt. The metric is the first
+  model step's input context: the system prompt plus every tool definition.
+- **End-to-end** — a real task that requires finding and calling one unique tool
+  (`postgres.list_databases`). The metric sums every step's input context, so the
+  router's `get_installed_mcps` → `get_mcp_tools` → `run_mcp_tool` discovery
+  round-trips are charged to it.
 
 ```sh
 uv run python scripts/context_benchmark.py --model openai/gpt-6-luna
-uv run python scripts/context_benchmark.py --n 1,3,5,10 --model openai/gpt-5-nano
+uv run python scripts/context_benchmark.py --mode end-to-end --n 1,3,5,10
+uv run python scripts/context_benchmark.py --mode registration
 ```
 
 - `--model` — `provider/model` (default `openai/gpt-6-luna`, the e2e default).
 - `--n` — comma-separated server counts (default `1,3,5,10`).
+- `--mode` — `registration`, `end-to-end`, or `both` (default `both`).
 - `--timeout` — per-run timeout in seconds (default 300).
 - `--keep-tmp` — keep the generated projects for debugging.
 
-The table reports `N | direct tokens | router tokens | saved | savings %` and
-whether savings grow with N. Token figures are the first step's
-`input + cache.read + cache.write`, so cached and uncached runs report the same
-full context.
+Registration-only and end-to-end measure different things, and the code reports
+both. Example run with `openai/gpt-5-nano` (absolute counts vary by model and
+provider):
+
+```text
+Registration-only (what the tool catalog costs before any work)
+
+  N | direct tokens | router tokens |   saved | savings %
+---------------------------------------------------------
+  1 |          2249 |          2027 |     222 |       9.9
+  3 |          3548 |          2027 |    1521 |      42.9
+  5 |          4823 |          2031 |    2792 |      57.9
+ 10 |          8090 |          2031 |    6059 |      74.9
+
+End-to-end task (full session, discovery round-trips included)
+
+  N | direct tokens | router tokens |   saved | savings %
+---------------------------------------------------------
+  1 |          5024 |         10157 |   -5133 |    -102.2
+  3 |          7466 |         10233 |   -2767 |     -37.1
+  5 |          9971 |         10706 |    -735 |      -7.4
+ 10 |         16606 |         14054 |    2552 |      15.4
+```
+
+This is the crossover the benchmark is meant to show: at small N the router's
+discovery round-trips cost more than the tools it avoids, so direct can win. As
+N grows, direct repeats N full tool catalogs on every model step while the
+router keeps showing only three tools, so the end-to-end saving grows and the
+router wins at large N. The router's own discovery output also grows with N, so
+the end-to-end gain is a trend rather than a guarantee at every adjacent N.
 
 The same measurement is available as an opt-in pytest test (excluded from the
 default suite by the `benchmark` marker):
@@ -180,9 +213,11 @@ uv run pytest -m benchmark --e2e-model openai/gpt-6-luna
 MCP_ROUTER_BENCH_N=1,5,10 uv run pytest -m benchmark --e2e-model openai/gpt-6-luna
 ```
 
-The test asserts that the router uses fewer input tokens for every N and that
-the saving grows as N grows. `MCP_ROUTER_BENCH_TIMEOUT` overrides its per-run
-timeout.
+The test asserts that registration-only always saves and grows, that the
+end-to-end router wins at the largest N, and that the end-to-end saving grows
+from the smallest to the largest N. It deliberately does not assert a positive
+end-to-end saving at N=1, where discovery overhead can exceed the avoided tools.
+`MCP_ROUTER_BENCH_TIMEOUT` overrides its per-run timeout.
 
 ## Connecting a client
 

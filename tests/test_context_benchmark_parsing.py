@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from context_benchmark import (  # noqa: E402
     BenchmarkError,
+    full_session_tokens,
     initial_context_tokens,
     parse_ns,
 )
@@ -38,20 +39,33 @@ def test_reads_first_step_input_plus_cache():
     assert initial_context_tokens(events) == 125
 
 
+def test_full_session_sums_every_step_input_plus_cache():
+    events = [
+        _step(100, cache_read=20, cache_write=5),
+        _step(200, cache_read=50),
+        _step(300),
+    ]
+    assert full_session_tokens(events) == 675
+
+
 def test_missing_input_token_count_fails_loudly():
     events = [{"type": "step_finish", "part": {"tokens": {"output": 3}}}]
-    with pytest.raises(BenchmarkError, match="input token count"):
-        initial_context_tokens(events)
+    for read in (initial_context_tokens, full_session_tokens):
+        with pytest.raises(BenchmarkError, match="input token count"):
+            read(events)
 
 
 def test_zero_token_count_fails_loudly():
-    with pytest.raises(BenchmarkError, match="zero input tokens"):
-        initial_context_tokens([_step(0)])
+    for read in (initial_context_tokens, full_session_tokens):
+        with pytest.raises(BenchmarkError, match="zero input tokens"):
+            read([_step(0)])
 
 
 def test_no_step_finish_fails_loudly():
-    with pytest.raises(BenchmarkError, match="no step_finish"):
-        initial_context_tokens([{"type": "text", "part": {"text": "ok"}}])
+    events = [{"type": "text", "part": {"text": "ok"}}]
+    for read in (initial_context_tokens, full_session_tokens):
+        with pytest.raises(BenchmarkError, match="no step_finish"):
+            read(events)
 
 
 def test_parse_ns_sorts_deduplicates_and_validates():
