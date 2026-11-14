@@ -95,6 +95,18 @@ def test_estimate_block_prints_formula_break_even_and_threshold():
     assert "assumptions: 10 tools per server" in text
 
 
+def test_default_estimate_matches_the_measured_single_search_crossover():
+    estimate = RoutingEstimate()
+    # Measured end-to-end: the router costs more at N=1 and first saves at N=3,
+    # i.e. around 35 tools with 12 tools per server (README crossover table).
+    assert estimate.router_tokens() > estimate.direct_tokens(
+        estimate.tools_per_server
+    )
+    assert estimate.router_tokens() < estimate.direct_tokens(
+        3 * estimate.tools_per_server
+    )
+
+
 def test_comparison_prints_estimate_next_to_measured_crossover():
     registration = [
         BenchmarkResult(n=1, direct_tokens=2000, router_tokens=1800),

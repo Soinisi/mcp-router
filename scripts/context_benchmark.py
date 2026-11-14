@@ -78,14 +78,14 @@ ROUTER_TOOL_COUNT = 3
 #: Analytical routing-estimate defaults. They model the benchmark's current
 #: measured behaviour (see README "Analytical estimate"): a synthetic server
 #: exposes 12 tools, a tool definition costs roughly 55 tokens, the end-to-end
-#: task takes two model steps, and finding the target server costs two discovery
-#: round trips (list servers, then list that server's tools), each an extra model
-#: step that re-sends the base prompt and its output.
+#: task takes two model steps, and finding the target tool costs one cross-server
+#: ``search_tools`` round trip, an extra model step that re-sends the base prompt
+#: and its output.
 DEFAULT_TOOLS_PER_SERVER = 12
 DEFAULT_TOKENS_PER_TOOL = 55
 DEFAULT_STEPS = 2
-DEFAULT_DISCOVERY_ROUND_TRIPS = 2
-DEFAULT_DISCOVERY_TOKENS = 3000
+DEFAULT_DISCOVERY_ROUND_TRIPS = 1
+DEFAULT_DISCOVERY_TOKENS = 3500
 DEFAULT_WORTH_ROUTING_MARGIN = 0.25
 
 #: opencode resolves its project from PWD and would otherwise inherit the
@@ -605,15 +605,18 @@ def format_estimate(estimate: RoutingEstimate | None = None) -> list[str]:
         estimate.discovery_round_trips
         * estimate.discovery_tokens_per_round_trip
     )
+    trips = (
+        f"{estimate.discovery_round_trips} discovery round "
+        f"{'trip' if estimate.discovery_round_trips == 1 else 'trips'} "
+        f"({estimate.discovery_tokens_per_round_trip} tokens)"
+    )
     return [
         "Analytical estimate (cost model, not a measurement)",
         "",
         (
             f"  assumptions: {estimate.tools_per_server} tools per server, "
             f"{estimate.tokens_per_tool} tokens per tool definition, "
-            f"{estimate.steps} model steps per session, "
-            f"{estimate.discovery_round_trips} discovery round trips at "
-            f"{estimate.discovery_tokens_per_round_trip} tokens each, "
+            f"{estimate.steps} model steps per session, {trips}, "
             f"router exposes {estimate.router_tools} tools."
         ),
         (
@@ -640,8 +643,8 @@ def format_estimate(estimate: RoutingEstimate | None = None) -> list[str]:
             "a full direct catalog but pays no extra discovery."
         ),
         (
-            "  assumes today's discovery round trips (list servers, then list the "
-            "target server's tools); revisit if round-trip optimization lands."
+            "  assumes one cross-server search_tools call finds the target; "
+            "a task that searches server by server pays one round trip per server."
         ),
     ]
 

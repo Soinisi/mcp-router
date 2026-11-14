@@ -253,26 +253,25 @@ M_worth = M* / (1 - m)
 ```
 
 The defaults model the benchmark's current behaviour: 12 tools per server, ~55
-tokens per tool definition, 2 model steps, 2 discovery round trips at ~3000
-tokens each, and a 25% margin:
+tokens per tool definition, 2 model steps, one cross-server `search_tools` call
+at ~3500 tokens (the extra model step plus its output), and a 25% margin:
 
 ```text
-break-even  M* = 3 + 6000 / 110 = 57.5 -> 58 tools  (~4.8 servers at 12 tools each)
-worth it    M  = 57.5 / 0.75    = 76.7 -> 77 tools  (~6.4 servers at 12 tools each)
+break-even  M* = 3 + 3500 / 110 = 34.8 -> 35 tools  (~2.9 servers at 12 tools each)
+worth it    M  = 34.8 / 0.75    = 46.4 -> 47 tools  (~3.9 servers at 12 tools each)
 ```
 
-So with today's discovery round-trips, routing only stops costing extra context
-once roughly 58 tools are registered, and only saves enough to clearly justify
-itself at around 77. Below that, a direct connection is the cheaper choice unless
+So with today's single discovery call, routing only stops costing extra context
+once roughly 35 tools are registered, and only saves enough to clearly justify
+itself at around 47. Below that, a direct connection is the cheaper choice unless
 the session is long. Longer sessions move both counts down, because direct
 re-sends the whole catalog on every step while the router pays its discovery cost
-once. This also assumes a task finds its server in the first catalog query (two
-round trips); a task that must inspect every server pays one round trip per
-server, which pushes the break-even higher as N grows. Each round trip is charged
-once; re-sending its output on later steps is not modeled. These are assumptions
-rather than measurements, and they are specific to the current discovery
-round-trips (`get_installed_mcps` then `get_mcp_tools`); revisit them if
-round-trip optimization lands.
+once. This assumes a task finds its tool in the first cross-server search; a task
+that searches server by server pays one round trip per server, which pushes the
+break-even higher as N grows. Each round trip is charged once; re-sending its
+output on later steps is not modeled. These are assumptions rather than
+measurements; they track one `search_tools` call and should be revisited if
+discovery changes again.
 
 The same measurement is available as an opt-in pytest test (excluded from the
 default suite by the `benchmark` marker):
