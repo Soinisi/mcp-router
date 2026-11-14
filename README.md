@@ -6,8 +6,10 @@ Instead of connecting an agent to every MCP server (and paying for all their
 tools up front), connect it to `mcp-router` alone. The agent sees exactly three
 tools and reaches everything else through them:
 
-1. `get_installed_mcps(regex_filter?)` — the registered servers.
-2. `get_mcp_tools(mcp_name, regex_filter?)` — the tools one server exposes.
+1. `get_installed_mcps(regex_filter?)` — the registered servers. The filter
+   matches server names and descriptions.
+2. `get_mcp_tools(mcp_name, regex_filter?)` — the tools one server exposes. The
+   filter matches tool names and descriptions.
 3. `run_mcp_tool(mcp_name, mcp_tool, arguments?)` — invoke one of them.
 
 Adding and removing servers is done from the CLI, never through the agent, so
@@ -144,6 +146,43 @@ through the router without an LLM and needs network access to
 `learn.microsoft.com`. `tests/test_sse_transport.py` starts a local SSE server
 and drives it through the router, so the legacy `sse` transport is covered by
 the default suite.
+
+## Context-savings benchmark
+
+`scripts/context_benchmark.py` measures what the router actually saves: it drives
+a real `opencode` session twice for several server counts N, once with opencode
+connected directly to N synthetic local MCP servers and once through
+`mcp-router`, then reads the input-token count of the first model step from
+opencode's JSON event stream. The synthetic servers expose realistic tool
+definitions with names, descriptions and inputSchemas; Code Mode is turned off
+so both configurations place the tools on the provider's native tool list.
+
+```sh
+uv run python scripts/context_benchmark.py --model openai/gpt-6-luna
+uv run python scripts/context_benchmark.py --n 1,3,5,10 --model openai/gpt-5-nano
+```
+
+- `--model` — `provider/model` (default `openai/gpt-6-luna`, the e2e default).
+- `--n` — comma-separated server counts (default `1,3,5,10`).
+- `--timeout` — per-run timeout in seconds (default 300).
+- `--keep-tmp` — keep the generated projects for debugging.
+
+The table reports `N | direct tokens | router tokens | saved | savings %` and
+whether savings grow with N. Token figures are the first step's
+`input + cache.read + cache.write`, so cached and uncached runs report the same
+full context.
+
+The same measurement is available as an opt-in pytest test (excluded from the
+default suite by the `benchmark` marker):
+
+```sh
+uv run pytest -m benchmark --e2e-model openai/gpt-6-luna
+MCP_ROUTER_BENCH_N=1,5,10 uv run pytest -m benchmark --e2e-model openai/gpt-6-luna
+```
+
+The test asserts that the router uses fewer input tokens for every N and that
+the saving grows as N grows. `MCP_ROUTER_BENCH_TIMEOUT` overrides its per-run
+timeout.
 
 ## Connecting a client
 

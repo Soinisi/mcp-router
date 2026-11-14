@@ -33,6 +33,10 @@ packages = ["src/mcp_router"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-markers = ["e2e: LLM/network end-to-end tests; excluded from the default suite"]
+markers = [
+    "e2e: LLM/network end-to-end tests; excluded from the default suite",
+    "benchmark: real-agent context-savings benchmark; excluded from the default suite",
+]
 # The LLM/network tests are opt-in: `uv run pytest -m e2e`.
-addopts = "-m 'not e2e'"
+# The real-agent benchmark is opt-in: `uv run pytest -m benchmark`.
+addopts = "-m 'not e2e and not benchmark'"

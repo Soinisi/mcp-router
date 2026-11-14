@@ -36,8 +36,8 @@ _TOOLS: list[types.Tool] = [
         description=(
             "List the MCP servers available to this connection (all registered "
             "servers, or the active scope's subset), optionally filtered by a "
-            "regular expression over their names. Call this first to discover "
-            "what is available. Returns each server's name, "
+            "regular expression over their names and descriptions. Call this "
+            "first to discover what is available. Returns each server's name, "
             "description and type. Set check=true to also connect and report "
             "reachability and tool counts."
         ),
@@ -46,7 +46,10 @@ _TOOLS: list[types.Tool] = [
             "properties": {
                 "regex_filter": {
                     "type": "string",
-                    "description": "Case-insensitive regex matched against server names.",
+                    "description": (
+                        "Case-insensitive regex matched against server names and "
+                        "descriptions."
+                    ),
                 },
                 "check": {
                     "type": "boolean",
@@ -75,7 +78,10 @@ _TOOLS: list[types.Tool] = [
                 },
                 "regex_filter": {
                     "type": "string",
-                    "description": "Case-insensitive regex matched against tool names.",
+                    "description": (
+                        "Case-insensitive regex matched against tool names and "
+                        "descriptions."
+                    ),
                 },
             },
             "required": ["mcp_name"],
@@ -133,6 +139,11 @@ def _compile_filter(pattern: str | None) -> re.Pattern[str] | None:
         return re.compile(pattern, re.IGNORECASE)
     except re.error as exc:
         raise ValueError(f"Invalid regex_filter {pattern!r}: {exc}") from exc
+
+
+def _matches(pattern: re.Pattern[str], *values: str | None) -> bool:
+    """True when the regex matches any of the given (possibly missing) strings."""
+    return any(value is not None and pattern.search(value) for value in values)
 
 
 def _active_scope_label() -> str:
@@ -224,7 +235,11 @@ async def _get_installed_mcps(manager: SessionManager, arguments: dict[str, Any]
     if _scope is not None:
         summaries = [s for s in summaries if s["name"] in _scope]
     if pattern is not None:
-        summaries = [s for s in summaries if pattern.search(s["name"])]
+        summaries = [
+            s
+            for s in summaries
+            if _matches(pattern, s["name"], s.get("description"))
+        ]
 
     if check:
         for summary in summaries:
@@ -253,7 +268,7 @@ async def _get_mcp_tools(manager: SessionManager, arguments: dict[str, Any]) -> 
     tools = result.tools
     tools = _filter_tools_by_scope(mcp_name, tools)
     if pattern is not None:
-        tools = [t for t in tools if pattern.search(t.name)]
+        tools = [t for t in tools if _matches(pattern, t.name, t.description)]
     payload = [t.model_dump(by_alias=True, exclude_none=True, mode="json") for t in tools]
     return _text(json.dumps(payload, indent=2))
 
