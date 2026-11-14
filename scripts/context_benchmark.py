@@ -11,12 +11,13 @@ Two measurements are reported:
 * **registration** -- the fixed prompt "reply ok". The metric is the first model
   step's input tokens: the context an agent pays before doing any work (system
   prompt + every tool definition + prompt).
-* **end-to-end** -- a real task that must find and call one unique tool
-  (``postgres.list_databases``). The metric is the whole session: every
-  ``step_finish`` input token count is summed, so the router's discovery
-  round-trips are charged to it. At small N the router can cost more; as N grows,
-  direct repeats N full tool catalogs on every step while the router still shows
-  only three tools.
+* **end-to-end** -- a real task that must find and call
+  ``postgres.list_databases``. Only the postgres server returns the target
+  payload, which the benchmark checks, so a run that never uses it is rejected.
+  The metric is the whole session: every ``step_finish`` input token count is
+  summed, so the router's discovery round-trips are charged to it. At small N the
+  router can cost more; as N grows, direct repeats N full tool catalogs on every
+  step while the router still shows only three tools.
 
 ``opencode run --format json`` reports tokens on each ``step_finish`` event as
 ``part.tokens``. A first request reports its whole context in ``input``; once a
@@ -297,10 +298,11 @@ def _tool_outputs(events: list[dict[str, Any]]) -> list[str]:
 def require_target_tool_called(
     events: list[dict[str, Any]], *, marker: str, mode: str, n: int
 ) -> None:
-    """Fail when an end-to-end run never executed the unique target tool.
+    """Fail when an end-to-end run never returned the target server's output.
 
-    A token count from a run that answered without calling the tool would
-    measure something other than the task, so it is not a valid data point.
+    A token count from a run that answered without the target server's
+    distinctive payload would measure something other than the task, so it is
+    not a valid data point.
     """
     if not any(marker in output for output in _tool_outputs(events)):
         raise BenchmarkError(

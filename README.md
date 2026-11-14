@@ -156,11 +156,14 @@ configurations: **direct** (opencode registers all N servers) and **router**
 measurements:
 
 - **Registration-only** — a fixed `reply ok` prompt. The metric is the first
-  model step's input context: the system prompt plus every tool definition.
-- **End-to-end** — a real task that requires finding and calling one unique tool
-  (`postgres.list_databases`). The metric sums every step's input context, so the
-  router's `get_installed_mcps` → `get_mcp_tools` → `run_mcp_tool` discovery
-  round-trips are charged to it.
+  model step's input context: the system prompt, every tool definition, and the
+  prompt.
+- **End-to-end** — a real task that requires finding and calling a tool on one
+  specific server (`postgres.list_databases`). Only that server returns the
+  expected payload, which the harness checks, so a run that answers without it
+  is rejected. The metric sums every step's input context, so the router's
+  `get_installed_mcps` → `get_mcp_tools` → `run_mcp_tool` discovery round-trips
+  are charged to it.
 
 ```sh
 uv run python scripts/context_benchmark.py --model openai/gpt-6-luna
