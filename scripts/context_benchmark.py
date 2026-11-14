@@ -19,6 +19,12 @@ Two measurements are reported:
   router can cost more; as N grows, direct repeats N full tool catalogs on every
   step while the router still shows only three tools.
 
+The report also derives an analytical estimate: direct re-sends N times
+tools-per-server times a per-tool token cost on every step, while the router
+re-sends three tool definitions plus a fixed cost per discovery round trip. That
+gives the break-even tool count, and the count at which routing saves enough to
+be worth it (a configurable margin). Assumptions are stated with the numbers.
+
 ``opencode run --format json`` reports tokens on each ``step_finish`` event as
 ``part.tokens``. A first request reports its whole context in ``input``; once a
 provider caches the prompt, uncached tokens appear in ``input`` and the rest in
@@ -39,6 +45,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -64,6 +71,22 @@ END_TO_END_PROMPT = (
     "tool once, and report the exact output you get back."
 )
 MODES = ("registration", "end-to-end")
+
+#: The router's MCP surface is exactly three tools (ADR 0001).
+ROUTER_TOOL_COUNT = 3
+
+#: Analytical routing-estimate defaults. They model the benchmark's current
+#: measured behaviour (see README "Analytical estimate"): a synthetic server
+#: exposes 12 tools, a tool definition costs roughly 55 tokens, the end-to-end
+#: task takes two model steps, and finding the target server costs two discovery
+#: round trips (list servers, then list that server's tools), each an extra model
+#: step that re-sends the base prompt and its output.
+DEFAULT_TOOLS_PER_SERVER = 12
+DEFAULT_TOKENS_PER_TOOL = 55
+DEFAULT_STEPS = 2
+DEFAULT_DISCOVERY_ROUND_TRIPS = 2
+DEFAULT_DISCOVERY_TOKENS = 3000
+DEFAULT_WORTH_ROUTING_MARGIN = 0.25
 
 #: opencode resolves its project from PWD and would otherwise inherit the
 #: session that launched the benchmark (see tests/e2e/conftest.py).
@@ -123,6 +146,83 @@ class BenchmarkResult:
     @property
     def savings_pct(self) -> float:
         return 100.0 * self.saved / self.direct_tokens
+
+
+def _checked_margin(margin: float) -> float:
+    if not 0.0 <= margin < 1.0:
+        raise BenchmarkError(
+            "estimate worth_routing_margin must be at least 0 and below 1"
+        )
+    return margin
+
+
+@dataclass(frozen=True)
+class RoutingEstimate:
+    """Analytical token model for one agent session.
+
+    Direct connections re-send every tool definition on every model step::
+
+        direct(M) = steps * M * tokens_per_tool
+
+    The router re-sends only its three discovery tools, and pays a fixed cost
+    for each round trip needed to find the target server::
+
+        router(M) = steps * router_tools * tokens_per_tool
+                    + discovery_round_trips * discovery_tokens_per_round_trip
+
+    ``M`` is the total number of tools behind the router (N servers times
+    ``tools_per_server``). Setting both costs equal gives the break-even tool
+    count; requiring a saving of ``worth_routing_margin`` gives the count at
+    which routing is clearly worth it.
+    """
+
+    tools_per_server: int = DEFAULT_TOOLS_PER_SERVER
+    tokens_per_tool: int = DEFAULT_TOKENS_PER_TOOL
+    steps: int = DEFAULT_STEPS
+    router_tools: int = ROUTER_TOOL_COUNT
+    discovery_round_trips: int = DEFAULT_DISCOVERY_ROUND_TRIPS
+    discovery_tokens_per_round_trip: int = DEFAULT_DISCOVERY_TOKENS
+    worth_routing_margin: float = DEFAULT_WORTH_ROUTING_MARGIN
+
+    def __post_init__(self) -> None:
+        for name in (
+            "tools_per_server",
+            "tokens_per_tool",
+            "steps",
+            "router_tools",
+        ):
+            value = getattr(self, name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                raise BenchmarkError(f"estimate {name} must be a positive integer")
+        for name in ("discovery_round_trips", "discovery_tokens_per_round_trip"):
+            value = getattr(self, name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise BenchmarkError(f"estimate {name} must be a non-negative integer")
+        _checked_margin(self.worth_routing_margin)
+
+    def direct_tokens(self, tools: int) -> float:
+        """Direct cost for ``tools`` total tools in one session."""
+        if tools < 0:
+            raise BenchmarkError("estimate tool count must not be negative")
+        return float(self.steps * tools * self.tokens_per_tool)
+
+    def router_tokens(self) -> float:
+        """Router cost for one session, independent of how many servers it fronts."""
+        return float(
+            self.steps * self.router_tools * self.tokens_per_tool
+            + self.discovery_round_trips * self.discovery_tokens_per_round_trip
+        )
+
+    def break_even_tools(self) -> float:
+        """Total tool count where direct cost equals router cost."""
+        return self.router_tokens() / (self.steps * self.tokens_per_tool)
+
+    def worth_routing_tools(self, margin: float | None = None) -> float:
+        """Total tool count where routing saves at least ``margin`` of direct cost."""
+        margin = _checked_margin(
+            self.worth_routing_margin if margin is None else margin
+        )
+        return self.break_even_tools() / (1.0 - margin)
 
 
 def parse_ns(value: str) -> list[int]:
@@ -477,6 +577,7 @@ def format_report(
     heading: str = "registration-only",
     note: str = "first model step's input context (input + cache read/write tokens)",
     trend: bool = False,
+    estimate: RoutingEstimate | None = None,
 ) -> str:
     lines = [
         f"mcp-router context-savings benchmark - {heading}",
@@ -488,8 +589,61 @@ def format_report(
     growth = _trend_line(results) if trend else _growth_line(results)
     if growth:
         lines += ["", growth]
+    if estimate is not None:
+        lines += ["", *format_estimate(estimate)]
     lines += ["", f"Measured as {note}."]
     return "\n".join(lines)
+
+
+def format_estimate(estimate: RoutingEstimate | None = None) -> list[str]:
+    """The analytical estimate block printed next to the measured crossover."""
+    estimate = estimate or RoutingEstimate()
+    break_even = estimate.break_even_tools()
+    worth = estimate.worth_routing_tools()
+    margin = f"{estimate.worth_routing_margin:.0%}"
+    discovery_tokens = (
+        estimate.discovery_round_trips
+        * estimate.discovery_tokens_per_round_trip
+    )
+    return [
+        "Analytical estimate (cost model, not a measurement)",
+        "",
+        (
+            f"  assumptions: {estimate.tools_per_server} tools per server, "
+            f"{estimate.tokens_per_tool} tokens per tool definition, "
+            f"{estimate.steps} model steps per session, "
+            f"{estimate.discovery_round_trips} discovery round trips at "
+            f"{estimate.discovery_tokens_per_round_trip} tokens each, "
+            f"router exposes {estimate.router_tools} tools."
+        ),
+        (
+            f"  direct(M) = {estimate.steps} x M x {estimate.tokens_per_tool}  "
+            f"(M = N x {estimate.tools_per_server} tools, re-sent every step)"
+        ),
+        (
+            f"  router    = {estimate.steps} x {estimate.router_tools} x "
+            f"{estimate.tokens_per_tool} + {discovery_tokens}"
+        ),
+        (
+            f"  break-even: M* = {estimate.router_tools} + {discovery_tokens} / "
+            f"({estimate.steps} x {estimate.tokens_per_tool}) = "
+            f"{math.ceil(break_even)} tools "
+            f"(~{break_even / estimate.tools_per_server:.1f} servers)"
+        ),
+        (
+            f"  worth routing (>= {margin} of direct's tool catalog): "
+            f"M = M* / (1 - {margin}) = {math.ceil(worth)} tools "
+            f"(~{worth / estimate.tools_per_server:.1f} servers)"
+        ),
+        (
+            "  longer sessions move both counts down: every extra step re-sends "
+            "a full direct catalog but pays no extra discovery."
+        ),
+        (
+            "  assumes today's discovery round trips (list servers, then list the "
+            "target server's tools); revisit if round-trip optimization lands."
+        ),
+    ]
 
 
 def _crossover_note(results: list[BenchmarkResult]) -> str:
@@ -540,6 +694,8 @@ def format_comparison(
         _trend_line(end_to_end),
         "",
         _crossover_note(end_to_end),
+        "",
+        *format_estimate(),
         "",
         (
             "Registration measures the first step's input context; end-to-end "
@@ -649,6 +805,7 @@ def main(argv: list[str] | None = None) -> int:
                 heading=args.mode,
                 note=note,
                 trend=args.mode == "end-to-end",
+                estimate=RoutingEstimate() if args.mode == "end-to-end" else None,
             )
         )
     return 0
