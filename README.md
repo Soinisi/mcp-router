@@ -211,10 +211,10 @@ the end-to-end gain is a trend rather than a guarantee at every adjacent N.
 ### Analytical estimate
 
 The measured numbers include everything the agent actually did, so they move with
-the model, provider and task. The report also prints an analytical estimate of
-the break-even point, and of when routing saves enough to be worth it, next to
-the measured crossover. The model, with `M` total tools behind the router and `S`
-model steps in a session, is:
+the model, provider and task. The end-to-end report also prints an analytical
+estimate of the break-even point, and of when routing saves enough to be worth
+it, next to the measured crossover. The model, with `M` total tools behind the
+router and `S` model steps in a session, is:
 
 ```text
 direct = S × M × P                         # every tool definition, re-sent each step
