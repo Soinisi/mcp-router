@@ -4,7 +4,8 @@ Each process serves one product domain, selected by ``BENCH_DOMAIN``. Every
 domain exposes realistic CRUD tools with a name, a description and a JSON
 inputSchema, so a direct connection costs the same kind of context a production
 MCP server would. The benchmark runs this file N times as N separate stdio
-servers; the tools are never called -- only their definitions are measured.
+servers. Registration mode measures only their definitions; end-to-end mode
+also calls the postgres target tool.
 """
 
 from __future__ import annotations
@@ -102,8 +103,10 @@ DOMAINS: dict[str, dict[str, Any]] = {
 }
 
 
-#: The end-to-end benchmark asks for this tool, which exists only on the
-#: postgres domain. postgres is first so the target server is present for every N.
+#: The end-to-end benchmark asks for this tool on the postgres domain. Other
+#: domains generate a tool with the same name, so only postgres returns the
+#: target payload; that keeps the marker a proof the target server was used.
+#: postgres is first so the target server is present for every N.
 TARGET_DOMAIN = "postgres"
 TARGET_TOOL = "list_databases"
 TARGET_OUTPUT_MARKER = "analytics"
@@ -214,7 +217,7 @@ def build_server(domain: str) -> Server:
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict[str, Any] | None) -> types.CallToolResult:
-        if name == TARGET_TOOL:
+        if name == TARGET_TOOL and domain == TARGET_DOMAIN:
             payload: Any = {"databases": _DATABASES}
         else:
             payload = {"tool": name, "arguments": arguments or {}, "ok": True}
