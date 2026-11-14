@@ -224,26 +224,6 @@ class RoutingEstimate:
         )
         return self.break_even_tools() / (1.0 - margin)
 
-    def worth_routing_steps(
-        self, tools: int, margin: float | None = None
-    ) -> float | None:
-        """Session length at which routing saves ``margin`` for ``tools`` tools.
-
-        Returns ``None`` when the catalog advantage can never reach the margin,
-        however many steps the session runs: the three router tools alone already
-        consume the margin.
-        """
-        margin = _checked_margin(
-            self.worth_routing_margin if margin is None else margin
-        )
-        if tools < 0:
-            raise BenchmarkError("estimate tool count must not be negative")
-        advantage = (1.0 - margin) * tools - self.router_tools
-        if advantage <= 0.0:
-            return None
-        discovery = self.discovery_round_trips * self.discovery_tokens_per_round_trip
-        return discovery / (self.tokens_per_tool * advantage)
-
 
 def parse_ns(value: str) -> list[int]:
     try:

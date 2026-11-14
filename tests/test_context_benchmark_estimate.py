@@ -55,13 +55,6 @@ def test_worth_routing_requires_the_configured_margin():
     assert saving < 0.25
 
 
-def test_worth_routing_steps_turns_a_tool_count_into_a_session_length():
-    estimate = _estimate()
-    # 2 * 1000 / (100 * (0.75 * 18 - 3)) = 1.904...
-    assert estimate.worth_routing_steps(18) == pytest.approx(2000 / 1050)
-    assert estimate.worth_routing_steps(4) is None
-
-
 def test_longer_sessions_lower_the_break_even():
     short = _estimate(steps=2)
     long = _estimate(steps=4)

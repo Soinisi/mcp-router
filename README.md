@@ -243,8 +243,8 @@ tokens per tool definition, 2 model steps, 2 discovery round trips at ~3000
 tokens each, and a 25% margin:
 
 ```text
-break-even  M* = 3 + 6000 / 110 = 58 tools  (~4.8 servers at 12 tools each)
-worth it    M  = 58 / 0.75      = 77 tools  (~6.4 servers at 12 tools each)
+break-even  M* = 3 + 6000 / 110 = 57.5 -> 58 tools  (~4.8 servers at 12 tools each)
+worth it    M  = 57.5 / 0.75    = 76.7 -> 77 tools  (~6.4 servers at 12 tools each)
 ```
 
 So with today's discovery round-trips, routing only stops costing extra context
