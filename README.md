@@ -208,6 +208,58 @@ router keeps showing only three tools, so the end-to-end saving grows and the
 router wins at large N. The router's own discovery output also grows with N, so
 the end-to-end gain is a trend rather than a guarantee at every adjacent N.
 
+### Analytical estimate
+
+The measured numbers include everything the agent actually did, so they move with
+the model, provider and task. The report also prints an analytical estimate of
+the break-even point, and of when routing saves enough to be worth it, next to
+the measured crossover. The model, with `M` total tools behind the router and `S`
+model steps in a session, is:
+
+```text
+direct = S × M × P                         # every tool definition, re-sent each step
+router = S × 3 × P + R × Q                 # three router tools + discovery round trips
+```
+
+`P` is the token cost of one tool definition, `R` the number of discovery round
+trips needed to find the target server, and `Q` the cost of one round trip (an
+extra model step re-sending the base prompt plus the discovery output). Setting
+the two costs equal gives the break-even tool count:
+
+```text
+M* = 3 + R × Q / (S × P)
+```
+
+Requiring a saving of at least `m` of direct's tool-catalog cost (the base prompt is
+excluded because both configurations pay it) gives the point where routing is
+clearly worth it:
+
+```text
+M_worth = M* / (1 - m)
+```
+
+The defaults model the benchmark's current behaviour: 12 tools per server, ~55
+tokens per tool definition, 2 model steps, 2 discovery round trips at ~3000
+tokens each, and a 25% margin:
+
+```text
+break-even  M* = 3 + 6000 / 110 = 58 tools  (~4.8 servers at 12 tools each)
+worth it    M  = 58 / 0.75      = 77 tools  (~6.4 servers at 12 tools each)
+```
+
+So with today's discovery round-trips, routing only stops costing extra context
+once roughly 58 tools are registered, and only saves enough to clearly justify
+itself at around 77. Below that, a direct connection is the cheaper choice unless
+the session is long. Longer sessions move both counts down, because direct
+re-sends the whole catalog on every step while the router pays its discovery cost
+once. This also assumes a task finds its server in the first catalog query (two
+round trips); a task that must inspect every server pays one round trip per
+server, which pushes the break-even higher as N grows. Each round trip is charged
+once; re-sending its output on later steps is not modeled. These are assumptions
+rather than measurements, and they are specific to the current discovery
+round-trips (`get_installed_mcps` then `get_mcp_tools`); revisit them if
+round-trip optimization lands.
+
 The same measurement is available as an opt-in pytest test (excluded from the
 default suite by the `benchmark` marker):
 
