@@ -7,7 +7,8 @@ only a discovery façade and proxying every real server behind it.
 
 **MCP router**:
 The single MCP server this project provides; a façade that fronts all other servers.
-_Avoid_: gateway, proxy server, mcp-of-mcps
+_Avoid_: gateway, mcp-of-mcps — "MCP proxy" or "router and proxy" is still fine as
+a descriptive phrase in user-facing copy; it is not a second name.
 
 **Registered server**:
 A server listed in the router's config that the router can reach on the agent's behalf.

@@ -17,9 +17,9 @@ step.
   having every server's catalog installed up front, so it only pays for what it
   looks up.
 - **Lower context and token cost.** The agent sees three tool definitions, not
-  every server's full catalog. The [benchmark](#context-savings-benchmark) shows
-  registration-only input context falling 72.5% at 10 servers and an end-to-end
-  session saving 55.5% of input tokens.
+  every server's full catalog. In the [benchmark](#context-savings-benchmark)
+  sample run, registration-only input context falls 72.5% at 10 servers and an
+  end-to-end session saves 55.5% of its input tokens.
 - **Per-connection scopes.** Each client or project sees only the servers and
   tools it needs, chosen by the launching environment.
 - **CLI-only registry changes.** Adding and removing servers is a command, never
