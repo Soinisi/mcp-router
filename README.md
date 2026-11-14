@@ -7,10 +7,22 @@ tools up front), connect it to `mcp-router` alone. The agent sees exactly three
 tools and reaches everything else through them:
 
 1. `get_installed_mcps(regex_filter?)` — the registered servers. The filter
-   matches server names and descriptions.
-2. `get_mcp_tools(mcp_name, regex_filter?)` — the tools one server exposes. The
-   filter matches tool names and descriptions.
+   matches server names and descriptions; `check=true` also reports reachability
+   and tool counts. Use it to browse or diagnose, not as a required first step.
+2. `search_tools(regex_filter?, mcp_name?, full?)` — find tools in one call.
+   With `mcp_name`, search that server; without it, search every scope-visible
+   server, matching server and tool names/descriptions and tagging each result
+   with its `mcp_name`. With neither, list the servers. Results are compact
+   `{name, description, signature, mcp_name}` summaries; `full=true` returns the
+   complete `inputSchema`. Cross-server results also carry an
+   `unreachable_servers` note, and a broad search over the 50-result cap is
+   refused with a "narrow the filter" message.
 3. `run_mcp_tool(mcp_name, mcp_tool, arguments?)` — invoke one of them.
+
+v2.0 collapses discovery into `search_tools` so the common path is
+`search_tools` → `run_mcp_tool` instead of one round trip per step. A filter
+that matches a server name or description narrows the scan to that server; use a
+tool keyword to search all servers. The three-tool surface is unchanged.
 
 Adding and removing servers is done from the CLI, never through the agent, so
 those operations never occupy an agent's context.
@@ -162,8 +174,7 @@ measurements:
   specific server (`postgres.list_databases`). Only that server returns the
   expected payload, which the harness checks, so a run that answers without it
   is rejected. The metric sums every step's input context, so the router's
-  `get_installed_mcps` → `get_mcp_tools` → `run_mcp_tool` discovery round-trips
-  are charged to it.
+  `search_tools` → `run_mcp_tool` discovery round-trips are charged to it.
 
 ```sh
 uv run python scripts/context_benchmark.py --model openai/gpt-6-luna
@@ -178,7 +189,7 @@ uv run python scripts/context_benchmark.py --mode registration
 - `--keep-tmp` — keep the generated projects for debugging.
 
 Registration-only and end-to-end measure different things, and the code reports
-both. Example run with `openai/gpt-5-nano` (absolute counts vary by model and
+both. Example run with `openai/gpt-6-luna` (absolute counts vary by model and
 provider):
 
 ```text
@@ -186,27 +197,30 @@ Registration-only (what the tool catalog costs before any work)
 
   N | direct tokens | router tokens |   saved | savings %
 ---------------------------------------------------------
-  1 |          2249 |          2027 |     222 |       9.9
-  3 |          3548 |          2027 |    1521 |      42.9
-  5 |          4823 |          2031 |    2792 |      57.9
- 10 |          8090 |          2031 |    6059 |      74.9
+  1 |          2253 |          2225 |      28 |       1.2
+  3 |          3544 |          2223 |    1321 |      37.3
+  5 |          4825 |          2221 |    2604 |      54.0
+ 10 |          8090 |          2223 |    5867 |      72.5
 
 End-to-end task (full session, discovery round-trips included)
 
   N | direct tokens | router tokens |   saved | savings %
 ---------------------------------------------------------
-  1 |          5024 |         10157 |   -5133 |    -102.2
-  3 |          7466 |         10233 |   -2767 |     -37.1
-  5 |          9971 |         10706 |    -735 |      -7.4
- 10 |         16606 |         14054 |    2552 |      15.4
+  1 |          4626 |          7106 |   -2480 |     -53.6
+  3 |          7232 |          7090 |     142 |       2.0
+  5 |          9798 |          7090 |    2708 |      27.6
+ 10 |         16316 |          7260 |    9056 |      55.5
 ```
 
 This is the crossover the benchmark is meant to show: at small N the router's
-discovery round-trips cost more than the tools it avoids, so direct can win. As
-N grows, direct repeats N full tool catalogs on every model step while the
-router keeps showing only three tools, so the end-to-end saving grows and the
-router wins at large N. The router's own discovery output also grows with N, so
-the end-to-end gain is a trend rather than a guarantee at every adjacent N.
+discovery round-trips cost more than the tools it avoids, so direct can win. In
+this run the router costs 2,480 more at N=1, first saves at N=3 (+142), and
+reaches +9,056 at N=10. Registration always saves, but at N=1 the saving is
+small (28 tokens) because the router's own three tool definitions are close to
+one server's catalog. As N grows, direct repeats N full tool catalogs on every
+model step while the router keeps showing only three tools, so the end-to-end
+saving grows. A broad cross-server search can grow the router's own output too;
+the 50-result cap and the compact summaries bound it.
 
 ### Analytical estimate
 
@@ -287,8 +301,9 @@ Point your MCP client at the stdio server:
 - Sessions are opened lazily on first use and cached for the router's lifetime.
 - Default timeout is 30s for connecting and for each tool call.
 - Failures are returned as `isError` results, never raised.
-- `get_mcp_tools` and `run_mcp_tool` return the child's results with their
-  standard MCP shapes, so the agent sees what it would have seen directly.
+- `search_tools` returns compact summaries by default and the child's
+  `inputSchema` with `full=true`; `run_mcp_tool` returns the child's result
+  verbatim, so the agent sees what it would have seen directly.
 
 See `CONTEXT.md` for the glossary and `docs/adr/` for the decisions behind this
 shape.

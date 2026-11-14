@@ -98,7 +98,18 @@ def _assert_all_servers_were_discovered(run) -> None:
     installed = [
         call for call in run.calls_to("get_installed_mcps") if call.status == "completed"
     ]
-    assert installed, "get_installed_mcps did not complete"
+    cross_server = [
+        call
+        for call in run.calls_to("search_tools")
+        if call.arg("mcp_name") is None and call.status == "completed"
+    ]
+    # The collapsed flow may skip get_installed_mcps and search tools across
+    # servers in one call. Either path is a valid discovery.
+    assert installed or cross_server, (
+        "neither get_installed_mcps nor a cross-server search_tools completed"
+    )
+    if not installed:
+        return
     names: set[str] = set()
     attributable = False
     for call in installed:
@@ -115,12 +126,14 @@ def _assert_all_servers_were_discovered(run) -> None:
 
 def _assert_tool_listing(run, server: str, expected_tools: set[str]):
     listed = [
-        call for call in run.calls_to("get_mcp_tools") if call.arg("mcp_name") == server
+        call
+        for call in run.calls_to("search_tools")
+        if call.arg("mcp_name") in (server, None)
     ]
-    assert listed, f"get_mcp_tools({server!r}) was not called"
+    assert listed, f"search_tools({server!r} or cross-server) was not called"
     completed = [call for call in listed if call.status == "completed"]
     assert completed, (
-        f"get_mcp_tools({server!r}) did not complete: "
+        f"search_tools({server!r} or cross-server) did not complete: "
         f"{[(call.block, call.status) for call in listed]}"
     )
     names: set[str] = set()

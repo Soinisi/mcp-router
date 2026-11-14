@@ -70,7 +70,7 @@ async def test_scope_filters_servers(tmp_path: Path):
         assert "alpha" in text
         assert "beta" not in text
 
-        hidden = await session.call_tool("get_mcp_tools", {"mcp_name": "beta"})
+        hidden = await session.call_tool("search_tools", {"mcp_name": "beta"})
         assert hidden.isError is True
         assert "not available in scope" in hidden.content[0].text
 
@@ -91,7 +91,7 @@ async def test_scope_filters_servers(tmp_path: Path):
 async def test_scope_filters_tools(tmp_path: Path):
     config = _write_config(tmp_path)
     async with _router(config, "echo-only") as session:
-        tools = await session.call_tool("get_mcp_tools", {"mcp_name": "alpha"})
+        tools = await session.call_tool("search_tools", {"mcp_name": "alpha"})
         assert tools.isError is False
         names = {item["name"] for item in json.loads(tools.content[0].text)}
         assert names == {"echo"}
@@ -111,6 +111,24 @@ async def test_scope_filters_tools(tmp_path: Path):
         assert allowed.content[0].text == "hi"
 
 
+async def test_scope_filters_cross_server_search(tmp_path: Path):
+    config = _write_config(tmp_path)
+    async with _router(config, "echo-only") as session:
+        result = await session.call_tool("search_tools", {"regex_filter": "alpha"})
+        assert result.isError is False
+        payload = json.loads(result.content[0].text)
+        assert {item["name"] for item in payload["tools"]} == {"echo"}
+        assert all(item["mcp_name"] == "alpha" for item in payload["tools"])
+
+
+async def test_scope_hides_a_server_from_cross_search(tmp_path: Path):
+    config = _write_config(tmp_path)
+    async with _router(config, "alpha-only") as session:
+        result = await session.call_tool("search_tools", {"regex_filter": "beta"})
+        assert result.isError is True
+        assert "No tools matched" in result.content[0].text
+
+
 async def test_no_scope_lists_everything(tmp_path: Path):
     config = _write_config(tmp_path)
     async with _router(config, None) as session:
@@ -118,7 +136,7 @@ async def test_no_scope_lists_everything(tmp_path: Path):
         text = installed.content[0].text
         assert "alpha" in text and "beta" in text
 
-        tools = await session.call_tool("get_mcp_tools", {"mcp_name": "beta"})
+        tools = await session.call_tool("search_tools", {"mcp_name": "beta"})
         names = {item["name"] for item in json.loads(tools.content[0].text)}
         assert {"echo", "add"} <= names
 

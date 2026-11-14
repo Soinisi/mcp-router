@@ -59,9 +59,13 @@ async def _installed(session: ClientSession, regex: str) -> set[str]:
 
 async def _tools(session: ClientSession, regex: str) -> set[str]:
     result = await session.call_tool(
-        "get_mcp_tools", {"mcp_name": "alpha", "regex_filter": regex}
+        "search_tools", {"mcp_name": "alpha", "regex_filter": regex}
     )
-    assert result.isError is False
+    if result.isError:
+        # A filtered search with no match is an actionable error, not an empty
+        # listing; the test's contract is only that no tool names came back.
+        assert "No tools matched" in result.content[0].text
+        return set()
     return {item["name"] for item in json.loads(result.content[0].text)}
 
 
@@ -93,7 +97,7 @@ async def test_installed_mcps_filter_matches_name_or_description(
         ("none", set()),
     ],
 )
-async def test_mcp_tools_filter_matches_name_or_description(
+async def test_search_tools_filter_matches_name_or_description(
     tmp_path: Path, regex: str, expected: set[str]
 ):
     async with _router(_write_config(tmp_path)) as session:

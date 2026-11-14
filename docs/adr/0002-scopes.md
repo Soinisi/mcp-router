@@ -6,7 +6,7 @@ underlying tool is an argument to `run_mcp_tool`. To give each agent a narrower
 view without adding MCP tools (which would cost every agent context), a scope is
 a named map from `mcp_name` to an optional tool allow-list, selected by
 `MCP_ROUTER_SCOPE` (or `serve --scope`). `get_installed_mcps` lists only the
-scope's servers, `get_mcp_tools` filters to the allow-list, and `run_mcp_tool`
+scope's servers, `search_tools` filters to the allow-list, and `run_mcp_tool`
 rejects out-of-scope servers and tools.
 
 Semantics: `null` = all tools, a list = only those tools, `[]` = none, an absent

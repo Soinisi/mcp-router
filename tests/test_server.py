@@ -71,7 +71,7 @@ async def test_end_to_end_via_stdio(tmp_path):
             tools = await session.list_tools()
             assert {t.name for t in tools.tools} == {
                 "get_installed_mcps",
-                "get_mcp_tools",
+                "search_tools",
                 "run_mcp_tool",
             }
 
@@ -79,7 +79,7 @@ async def test_end_to_end_via_stdio(tmp_path):
             data = json.loads(installed.content[0].text)
             assert data[0]["name"] == "child"
 
-            child_tools = await session.call_tool("get_mcp_tools", {"mcp_name": "child"})
+            child_tools = await session.call_tool("search_tools", {"mcp_name": "child"})
             names = {t["name"] for t in json.loads(child_tools.content[0].text)}
             assert {"echo", "add"} <= names
 
@@ -101,6 +101,6 @@ async def test_end_to_end_error_is_returned_not_raised(tmp_path):
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
-            bad = await session.call_tool("get_mcp_tools", {"mcp_name": "ghost"})
+            bad = await session.call_tool("search_tools", {"mcp_name": "ghost"})
             assert bad.isError is True
             assert "Unknown server" in bad.content[0].text

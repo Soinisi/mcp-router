@@ -2,7 +2,7 @@
 
 An agent connects to exactly one MCP server — the router — rather than to every
 registered server. The router exposes only three read/run tools
-(`get_installed_mcps`, `get_mcp_tools`, `run_mcp_tool`) and pulls the rest of its
+(`get_installed_mcps`, `search_tools`, `run_mcp_tool`) and pulls the rest of its
 knowledge from the registered servers at runtime. This trades a little latency
 for a large context win: the agent never carries the tool definitions of servers
 it isn't using.
@@ -27,8 +27,13 @@ Two consequences of that shape are deliberate and easy to "fix" wrongly:
 
 ## Consequences
 
-- `get_mcp_tools` and `run_mcp_tool` reproduce the child's standard MCP result
-  shapes rather than re-wrapping them; a proxy hop cannot be byte-identical to a
+- `search_tools` returns compact tool summaries by default, and the child's full
+  `inputSchema` when `full=true`; `run_mcp_tool` reproduces the child's result
+  shape rather than re-wrapping it. A proxy hop cannot be byte-identical to a
   direct connection, so results are faithful, not literally identical.
+- `search_tools` may search across every scope-visible server when `mcp_name` is
+  omitted, so discovery can be one round trip. A filter that matches a server
+  name narrows the scan to that server, a broad result is capped, and a partial
+  scan reports its `unreachable_servers`.
 - Secrets resolve at connect time from the environment and `.env`, so listing
   servers never requires the secrets — only using a server does.
