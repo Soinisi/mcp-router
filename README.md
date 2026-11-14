@@ -6,8 +6,10 @@ Instead of connecting an agent to every MCP server (and paying for all their
 tools up front), connect it to `mcp-router` alone. The agent sees exactly three
 tools and reaches everything else through them:
 
-1. `get_installed_mcps(regex_filter?)` — the registered servers.
-2. `get_mcp_tools(mcp_name, regex_filter?)` — the tools one server exposes.
+1. `get_installed_mcps(regex_filter?)` — the registered servers. The filter
+   matches server names and descriptions.
+2. `get_mcp_tools(mcp_name, regex_filter?)` — the tools one server exposes. The
+   filter matches tool names and descriptions.
 3. `run_mcp_tool(mcp_name, mcp_tool, arguments?)` — invoke one of them.
 
 Adding and removing servers is done from the CLI, never through the agent, so
@@ -144,6 +146,81 @@ through the router without an LLM and needs network access to
 `learn.microsoft.com`. `tests/test_sse_transport.py` starts a local SSE server
 and drives it through the router, so the legacy `sse` transport is covered by
 the default suite.
+
+## Context-savings benchmark
+
+`scripts/context_benchmark.py` measures what the router actually saves by
+driving a real `opencode` agent against N synthetic local MCP servers in two
+configurations: **direct** (opencode registers all N servers) and **router**
+(opencode registers only `mcp-router`, which fronts the same N). It reports two
+measurements:
+
+- **Registration-only** — a fixed `reply ok` prompt. The metric is the first
+  model step's input context: the system prompt, every tool definition, and the
+  prompt.
+- **End-to-end** — a real task that requires finding and calling a tool on one
+  specific server (`postgres.list_databases`). Only that server returns the
+  expected payload, which the harness checks, so a run that answers without it
+  is rejected. The metric sums every step's input context, so the router's
+  `get_installed_mcps` → `get_mcp_tools` → `run_mcp_tool` discovery round-trips
+  are charged to it.
+
+```sh
+uv run python scripts/context_benchmark.py --model openai/gpt-6-luna
+uv run python scripts/context_benchmark.py --mode end-to-end --n 1,3,5,10
+uv run python scripts/context_benchmark.py --mode registration
+```
+
+- `--model` — `provider/model` (default `openai/gpt-6-luna`, the e2e default).
+- `--n` — comma-separated server counts (default `1,3,5,10`).
+- `--mode` — `registration`, `end-to-end`, or `both` (default `both`).
+- `--timeout` — per-run timeout in seconds (default 300).
+- `--keep-tmp` — keep the generated projects for debugging.
+
+Registration-only and end-to-end measure different things, and the code reports
+both. Example run with `openai/gpt-5-nano` (absolute counts vary by model and
+provider):
+
+```text
+Registration-only (what the tool catalog costs before any work)
+
+  N | direct tokens | router tokens |   saved | savings %
+---------------------------------------------------------
+  1 |          2249 |          2027 |     222 |       9.9
+  3 |          3548 |          2027 |    1521 |      42.9
+  5 |          4823 |          2031 |    2792 |      57.9
+ 10 |          8090 |          2031 |    6059 |      74.9
+
+End-to-end task (full session, discovery round-trips included)
+
+  N | direct tokens | router tokens |   saved | savings %
+---------------------------------------------------------
+  1 |          5024 |         10157 |   -5133 |    -102.2
+  3 |          7466 |         10233 |   -2767 |     -37.1
+  5 |          9971 |         10706 |    -735 |      -7.4
+ 10 |         16606 |         14054 |    2552 |      15.4
+```
+
+This is the crossover the benchmark is meant to show: at small N the router's
+discovery round-trips cost more than the tools it avoids, so direct can win. As
+N grows, direct repeats N full tool catalogs on every model step while the
+router keeps showing only three tools, so the end-to-end saving grows and the
+router wins at large N. The router's own discovery output also grows with N, so
+the end-to-end gain is a trend rather than a guarantee at every adjacent N.
+
+The same measurement is available as an opt-in pytest test (excluded from the
+default suite by the `benchmark` marker):
+
+```sh
+uv run pytest -m benchmark --e2e-model openai/gpt-6-luna
+MCP_ROUTER_BENCH_N=1,5,10 uv run pytest -m benchmark --e2e-model openai/gpt-6-luna
+```
+
+The test asserts that registration-only always saves and grows, that the
+end-to-end router wins at the largest N, and that the end-to-end saving grows
+from the smallest to the largest N. It deliberately does not assert a positive
+end-to-end saving at N=1, where discovery overhead can exceed the avoided tools.
+`MCP_ROUTER_BENCH_TIMEOUT` overrides its per-run timeout.
 
 ## Connecting a client
 
