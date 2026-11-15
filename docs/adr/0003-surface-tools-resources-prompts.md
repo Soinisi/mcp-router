@@ -76,15 +76,18 @@ so a category that was not named must not be silently allowed. It also keeps v1
 configs working unchanged — a bare tool list leaves resources and prompts
 closed, so gaining a resource category never widens an existing scope.
 
-Tools and prompts are matched by name. Resources are matched by URI pattern: a
-literal entry is a prefix (`tickets://`), and a template such as
-`docs://{path}` matches concrete URIs in that shape. Resources have no stable
-name to match by, so the URI is the only honest key.
+Tools and prompts are matched by name. Resources are matched by URI: a literal
+entry matches exactly that URI, an entry ending in `/` (such as `tickets://`)
+matches that prefix, and a template such as `docs://{path}` matches concrete
+URIs in that shape. Resources have no stable name to match by, so the URI is
+the only honest key.
 
 Version rule, kept consistent across `add`, `remove` and `dump_config`: reads
 accept version 1 and 2 and either entry shape; a write emits version 2 as soon
-as the document contains (or declares) the per-category mapping shape, and
-otherwise preserves the declared version and the legacy shape.
+as the document contains (or declares) resource or prompt allow-lists, and
+otherwise preserves the declared version and the legacy shape. A mapping that
+carries only `tools` means the same as the legacy bare list, so it does not by
+itself force version 2.
 
 ## Out of scope
 
@@ -110,9 +113,9 @@ Three MCP features are deliberately not proxied:
   not a constant. Tests and documentation key on capability, not a fixed count.
 - Read results are returned as embedded resources, preserving the child's
   content blocks (text or blob) and MIME type rather than flattening them.
-- Resource scope entries are prefixes/templates, so a policy grants a URI
-  family rather than one exact URI; an exact URI is just a prefix that happens
-  to match only itself.
+- A resource scope entry grants exactly the URI it names unless it ends in `/`
+  (prefix) or carries `{...}` placeholders (template). Listing one URI never
+  authorizes a sibling that merely shares its prefix.
 - The startup probe is bounded by the connect timeout and parallel across
   servers, but a slow server still delays the router's first response.
 - The `prompts` scope key is parsed, validated and probed while no prompt tools

@@ -312,6 +312,19 @@ def test_dump_config_writes_v2_for_per_category_scopes():
     }
 
 
+def test_dump_config_keeps_v1_for_tools_only_mapping():
+    config = parse_config(
+        {
+            "version": 1,
+            "mcp_servers": {"t": {"type": "local", "command": "true"}},
+            "scopes": {"x": {"t": {"tools": ["echo"]}}},
+        }
+    )
+    dump = yaml.safe_load(dump_config(config))
+    assert dump["version"] == 1
+    assert dump["scopes"] == {"x": {"t": ["echo"]}}
+
+
 def test_dump_config_bumps_version_for_category_values_in_v1_document():
     config = parse_config(
         {

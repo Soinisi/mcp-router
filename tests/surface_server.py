@@ -49,7 +49,13 @@ if MODE in {"resources", "both"}:
                 name="doc",
                 description="A surface document.",
                 mimeType="text/plain",
-            )
+            ),
+            types.Resource(
+                uri="surface://doc_secret",
+                name="doc_secret",
+                description="A sibling document sharing the doc URI prefix.",
+                mimeType="text/plain",
+            ),
         ]
 
     @server.list_resource_templates()

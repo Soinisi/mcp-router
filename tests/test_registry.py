@@ -100,6 +100,24 @@ def test_write_keeps_v1_when_scopes_use_the_legacy_shape(user_config):
     assert raw["scopes"]["support"]["tickets"] == ["get_ticket"]
 
 
+def test_write_keeps_v1_for_tools_only_mapping(user_config):
+    user_config.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "mcp_servers": {},
+                "scopes": {"support": {"tickets": {"tools": ["get_ticket"]}}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    add_server("tickets", {"type": "local", "command": "a"})
+
+    raw = yaml.safe_load(user_config.read_text(encoding="utf-8"))
+    assert raw["version"] == 1
+    assert raw["scopes"]["support"]["tickets"] == {"tools": ["get_ticket"]}
+
+
 def test_write_upgrades_version_for_per_category_scopes(user_config):
     user_config.write_text(
         yaml.safe_dump(

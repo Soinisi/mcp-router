@@ -194,6 +194,72 @@ async def test_resource_template_pattern_in_scope(tmp_path: Path):
         assert denied.isError is True
 
 
+async def test_resource_scope_exact_entry_matches_only_itself(tmp_path: Path):
+    config = _write_config(
+        tmp_path,
+        {"surface": _local(SURFACE, "resources")},
+        scopes={
+            "doc-only": {
+                "surface": {"resources": ["surface://doc"]},
+            }
+        },
+        version=2,
+    )
+    async with _router(config, "doc-only") as session:
+        entries = await _search(session, {"mcp_name": "surface"})
+        assert [entry["name"] for entry in entries] == ["doc"]
+
+        allowed = await session.call_tool(
+            "read_resource", {"mcp_name": "surface", "uri": "surface://doc"}
+        )
+        assert allowed.isError is False
+
+        sibling = await session.call_tool(
+            "read_resource",
+            {"mcp_name": "surface", "uri": "surface://doc_secret"},
+        )
+        assert sibling.isError is True
+        assert "not available" in sibling.content[0].text
+
+        template = await session.call_tool(
+            "read_resource", {"mcp_name": "surface", "uri": "surface://item/7"}
+        )
+        assert template.isError is True
+        assert "not available" in template.content[0].text
+
+
+async def test_resource_scope_trailing_slash_is_a_prefix(tmp_path: Path):
+    config = _write_config(
+        tmp_path,
+        {"surface": _local(SURFACE, "resources")},
+        scopes={
+            "surface-all": {
+                "surface": {"resources": ["surface://"]},
+            }
+        },
+        version=2,
+    )
+    async with _router(config, "surface-all") as session:
+        entries = await _search(session, {"mcp_name": "surface"})
+        assert {entry["name"] for entry in entries} == {
+            "doc",
+            "doc_secret",
+            "item",
+        }
+
+        sibling = await session.call_tool(
+            "read_resource",
+            {"mcp_name": "surface", "uri": "surface://doc_secret"},
+        )
+        assert sibling.isError is False
+
+        other_scheme = await session.call_tool(
+            "read_resource", {"mcp_name": "surface", "uri": "other://doc"}
+        )
+        assert other_scheme.isError is True
+        assert "not available" in other_scheme.content[0].text
+
+
 async def test_v1_scope_keeps_resources_closed(tmp_path: Path):
     # A v1 bare list only allow-lists tools; resources stay unavailable rather
     # than silently widening when the router gains the category.
@@ -235,6 +301,43 @@ async def test_unreachable_server_does_not_block_startup(tmp_path: Path):
         assert {entry["mcp_name"] for entry in body["resources"]} == {"alpha"}
 
 
+async def test_check_clears_stale_probe_error_after_reconnect(tmp_path: Path):
+    marker = tmp_path / "up"
+    flaky = tmp_path / "flaky_server.py"
+    flaky.write_text(
+        "import pathlib, runpy, sys\n"
+        f"if not pathlib.Path({str(marker)!r}).exists():\n"
+        "    sys.exit(1)\n"
+        f"runpy.run_path({str(SURFACE)!r}, run_name='__main__')\n",
+        encoding="utf-8",
+    )
+    config = _write_config(tmp_path, {"flaky": _local(flaky, "both")})
+
+    async with _router(config) as session:
+        before = await session.call_tool("get_installed_mcps", {})
+        summary = {
+            item["name"]: item for item in json.loads(before.content[0].text)
+        }["flaky"]
+        assert summary["reachable"] is False
+        assert "error" in summary
+
+        marker.write_text("up", encoding="utf-8")
+
+        after = await session.call_tool("get_installed_mcps", {"check": True})
+        summary = {
+            item["name"]: item for item in json.loads(after.content[0].text)
+        }["flaky"]
+        assert summary["reachable"] is True
+        assert "error" not in summary
+        assert summary["tool_count"] == 1
+
+        later = await session.call_tool("get_installed_mcps", {})
+        summary = {
+            item["name"]: item for item in json.loads(later.content[0].text)
+        }["flaky"]
+        assert "error" not in summary
+
+
 async def test_tool_only_servers_omit_resource_tools(tmp_path: Path):
     config = _write_config(
         tmp_path, {"surface": _local(SURFACE, "tools")}
@@ -267,6 +370,7 @@ async def test_resource_only_servers_omit_tool_tools(tmp_path: Path):
         entries = await _search(session, {"mcp_name": "surface"})
         assert {(entry["name"], entry.get("template")) for entry in entries} == {
             ("doc", None),
+            ("doc_secret", None),
             ("item", True),
         }
         read = await session.call_tool(

@@ -72,8 +72,9 @@ class ScopeEntry(BaseModel):
     ``null``) is read as ``tools: [...]`` / ``tools: null`` with resources and
     prompts empty.
 
-    Tool and prompt entries are names; resource entries are URI patterns
-    (a literal prefix, or a template such as ``docs://{path}``).
+    Tool and prompt entries are names. Resource entries are exact URIs by
+    default; a trailing ``/`` makes the entry a prefix (``tickets://``), and a
+    template such as ``docs://{path}`` matches concrete URIs in that shape.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -331,14 +332,22 @@ def load_config(
 
 
 def scope_uses_categories(scopes: Any) -> bool:
-    """True when any raw scope entry uses the v2 per-category mapping shape."""
+    """True when a scope entry needs the v2 per-category mapping shape.
+
+    Only a resource or prompt allow-list forces version 2: a mapping carrying
+    just ``tools`` means the same as the legacy bare list, so it does not.
+    """
     if not isinstance(scopes, dict):
         return False
     for entries in scopes.values():
-        if isinstance(entries, dict) and any(
-            isinstance(entry, dict) for entry in entries.values()
-        ):
-            return True
+        if not isinstance(entries, dict):
+            continue
+        for entry in entries.values():
+            if isinstance(entry, dict) and any(
+                category in entry and entry[category] != []
+                for category in ("resources", "prompts")
+            ):
+                return True
     return False
 
 
@@ -346,28 +355,30 @@ def _serialise_scopes(config: RouterConfig) -> tuple[int, dict[str, dict[str, An
     """Scope payload plus the version its shape requires.
 
     Rule: a document is written as version 2 as soon as it contains (or asks
-    for) the per-category mapping shape; otherwise it keeps the declared
+    for) resource or prompt allow-lists; otherwise it keeps the declared
     version and the legacy bare-list shape. A parsed v2 config therefore stays
     v2 on write, and a parsed v1 config stays v1.
     """
-    needs_v2 = config.version == 2 or any(
-        entry.resources != [] or entry.prompts != []
-        for scope in config.scopes.values()
-        for entry in scope.values()
-    )
+    category_payload: dict[str, dict[str, Any]] = {
+        scope_name: {
+            server_name: entry.model_dump()
+            for server_name, entry in entries.items()
+        }
+        for scope_name, entries in config.scopes.items()
+    }
+    needs_v2 = config.version == 2 or scope_uses_categories(category_payload)
     version = 2 if needs_v2 else 1
 
-    payload: dict[str, dict[str, Any]] = {}
-    for scope_name, entries in config.scopes.items():
-        scope_payload: dict[str, Any] = {}
-        for server_name, entry in entries.items():
-            if version == 2:
-                scope_payload[server_name] = entry.model_dump()
-            elif entry.tools is None:
-                scope_payload[server_name] = None
-            else:
-                scope_payload[server_name] = list(entry.tools)
-        payload[scope_name] = scope_payload
+    if version == 2:
+        return version, category_payload
+
+    payload: dict[str, dict[str, Any]] = {
+        scope_name: {
+            server_name: None if entry.tools is None else list(entry.tools)
+            for server_name, entry in entries.items()
+        }
+        for scope_name, entries in config.scopes.items()
+    }
     return version, payload
 
 

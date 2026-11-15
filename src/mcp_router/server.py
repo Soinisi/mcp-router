@@ -317,18 +317,33 @@ def _require_tool_in_scope(mcp_name: str, mcp_tool: str) -> None:
         )
 
 
-def _resource_pattern(pattern: str) -> re.Pattern[str]:
-    """A URI allow-list entry as a prefix matcher.
+_TEMPLATE_PART = re.compile(r"\{[^}]*\}")
 
-    A literal entry is a prefix; a template such as ``docs://{path}`` matches
-    any concrete URI in that shape. Scope resources are patterns, not names,
-    because MCP resources have no stable name.
+
+def _resource_pattern(entry: str) -> re.Pattern[str]:
+    """Compile a resource allow-list entry into a URI matcher.
+
+    A literal URI matches only itself. A trailing ``/`` opts into prefix
+    matching, and ``{...}`` placeholders make it a template over concrete URIs.
+    Scope resources are patterns, not names, because MCP resources have no
+    stable name.
     """
-    parts = re.split(r"\{[^}]*\}", pattern)
-    return re.compile("^" + ".*".join(re.escape(part) for part in parts))
+    parts = _TEMPLATE_PART.split(entry)
+    if len(parts) > 1:
+        return re.compile(
+            "^" + ".*".join(re.escape(part) for part in parts) + r"\Z"
+        )
+    if entry.endswith("/"):
+        return re.compile("^" + re.escape(entry))
+    return re.compile("^" + re.escape(entry) + r"\Z")
 
 
 def _resource_allowed(allowed: list[str] | None, *uris: str) -> bool:
+    """True when an allow-list entry matches one of ``uris``.
+
+    An entry matches exactly, by trailing-``/`` prefix, or through its
+    ``{...}`` template placeholders; see :func:`_resource_pattern`.
+    """
     if allowed is None:
         return True
     patterns = [_resource_pattern(pattern) for pattern in allowed]
@@ -544,6 +559,8 @@ async def _get_installed_mcps(manager: SessionManager, arguments: dict[str, Any]
             try:
                 session = await manager.session(summary["name"])
                 summary["reachable"] = True
+                summary.pop("error", None)
+                _probe_errors.pop(summary["name"], None)
                 if _offers(summary["name"], "tools"):
                     result = await session.call(lambda s: s.list_tools())
                     summary["tool_count"] = len(
