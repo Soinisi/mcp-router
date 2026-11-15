@@ -38,6 +38,20 @@ def _broken() -> dict:
     }
 
 
+def _flaky(tmp_path: Path, mode: str) -> tuple[dict, Path]:
+    """A server that exits at startup until the returned marker file exists."""
+    marker = tmp_path / f"up-{mode}"
+    script = tmp_path / f"flaky_{mode}.py"
+    script.write_text(
+        "import pathlib, runpy, sys\n"
+        f"if not pathlib.Path({str(marker)!r}).exists():\n"
+        "    sys.exit(1)\n"
+        f"runpy.run_path({str(SURFACE)!r}, run_name='__main__')\n",
+        encoding="utf-8",
+    )
+    return _local(script, mode), marker
+
+
 def _write_config(
     tmp_path: Path,
     servers: dict,
@@ -402,6 +416,73 @@ async def test_check_clears_stale_probe_error_after_reconnect(tmp_path: Path):
             item["name"]: item for item in json.loads(later.content[0].text)
         }["flaky"]
         assert "error" not in summary
+
+
+async def test_check_reports_recovered_server_with_live_capabilities(tmp_path: Path):
+    flaky, marker = _flaky(tmp_path, "resources")
+    config = _write_config(tmp_path, {"alpha": _local(CHILD), "flaky": flaky})
+
+    async with _router(config) as session:
+        marker.write_text("up", encoding="utf-8")
+
+        after = await session.call_tool("get_installed_mcps", {"check": True})
+        summary = {
+            item["name"]: item for item in json.loads(after.content[0].text)
+        }["flaky"]
+        assert summary["reachable"] is True
+        assert "error" not in summary
+        assert summary["tool_count"] == 0
+
+
+async def test_recovered_server_uses_live_capabilities_in_searches(tmp_path: Path):
+    flaky, marker = _flaky(tmp_path, "resources")
+    config = _write_config(tmp_path, {"alpha": _local(CHILD), "flaky": flaky})
+
+    async with _router(config) as session:
+        marker.write_text("up", encoding="utf-8")
+
+        tools = await session.call_tool("search_tools", {"mcp_name": "flaky"})
+        assert tools.isError is True
+        assert "does not offer tools" in tools.content[0].text
+
+        resources = await session.call_tool(
+            "search_resources", {"mcp_name": "flaky"}
+        )
+        assert resources.isError is False
+        assert {entry["name"] for entry in json.loads(resources.content[0].text)} == {
+            "doc",
+            "doc_secret",
+            "item",
+        }
+
+        installed = await session.call_tool("get_installed_mcps", {})
+        summary = {
+            item["name"]: item for item in json.loads(installed.content[0].text)
+        }["flaky"]
+        assert "error" not in summary
+        assert summary.get("reachable") is not False
+
+
+async def test_cross_search_skips_recovered_wrong_category_server(tmp_path: Path):
+    flaky, marker = _flaky(tmp_path, "tools")
+    config = _write_config(tmp_path, {"alpha": _local(CHILD), "flaky": flaky})
+
+    async with _router(config) as session:
+        marker.write_text("up", encoding="utf-8")
+
+        resources = await session.call_tool(
+            "search_resources", {"regex_filter": "readme"}
+        )
+        assert resources.isError is False
+        body = json.loads(resources.content[0].text)
+        assert body["unreachable_servers"] == []
+        assert {entry["mcp_name"] for entry in body["resources"]} == {"alpha"}
+
+        tools = await session.call_tool("search_tools", {"regex_filter": "echo"})
+        assert tools.isError is False
+        body = json.loads(tools.content[0].text)
+        assert body["unreachable_servers"] == []
+        assert {entry["mcp_name"] for entry in body["tools"]} == {"alpha"}
 
 
 async def test_tool_only_servers_omit_resource_tools(tmp_path: Path):

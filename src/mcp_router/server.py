@@ -452,6 +452,15 @@ def _too_many_message(count: int, raw_filter: str | None) -> str:
     )
 
 
+def _offered_categories(capabilities: Any) -> set[str]:
+    """The surface categories a server's advertised capabilities cover."""
+    return {
+        category
+        for category in CAPABILITY_CATEGORIES
+        if getattr(capabilities, category, None) is not None
+    }
+
+
 async def _probe_capabilities(manager: SessionManager) -> None:
     """Connect to each scope-visible server and cache the advertised surface.
 
@@ -480,14 +489,37 @@ async def _probe_capabilities(manager: SessionManager) -> None:
             # Unreachable at probe time: leave it out of the cache so discovery
             # still retries it and can report it as unreachable.
             continue
-        offered = {
-            category
-            for category in CAPABILITY_CATEGORIES
-            if getattr(capabilities, category, None) is not None
-        }
+        offered = _offered_categories(capabilities)
         _server_capabilities[mcp_name] = offered
         for category in offered:
             _capabilities[category] = True
+
+
+def _record_connection(mcp_name: str, session: ServerSession) -> None:
+    """Refresh the probe caches after a successful connection."""
+    _probe_errors.pop(mcp_name, None)
+    if session.capabilities is not None:
+        _server_capabilities[mcp_name] = _offered_categories(session.capabilities)
+
+
+async def _session(manager: SessionManager, mcp_name: str) -> ServerSession:
+    session = await manager.session(mcp_name)
+    _record_connection(mcp_name, session)
+    return session
+
+
+async def _connect_offering(
+    manager: SessionManager, mcp_name: str, category: str
+) -> ServerSession | None:
+    """Connect to a server, returning None when it lacks ``category``.
+
+    A server already probed without the category is not connected; a server
+    unreachable at probe time is connected and its capabilities re-read.
+    """
+    if not _offers(mcp_name, category):
+        return None
+    session = await _session(manager, mcp_name)
+    return session if _offers(mcp_name, category) else None
 
 
 @asynccontextmanager
@@ -573,10 +605,9 @@ async def _get_installed_mcps(manager: SessionManager, arguments: dict[str, Any]
     if check:
         for summary in summaries:
             try:
-                session = await manager.session(summary["name"])
+                session = await _session(manager, summary["name"])
                 summary["reachable"] = True
                 summary.pop("error", None)
-                _probe_errors.pop(summary["name"], None)
                 if _offers(summary["name"], "tools"):
                     result = await session.call(lambda s: s.list_tools())
                     summary["tool_count"] = len(
@@ -599,9 +630,9 @@ async def _search_tools(manager: SessionManager, arguments: dict[str, Any]) -> t
 
     if mcp_name:
         _require_server_in_scope(mcp_name)
-        if not _offers(mcp_name, "tools"):
+        session = await _connect_offering(manager, mcp_name, "tools")
+        if session is None:
             return _error(f"Server {mcp_name!r} does not offer tools.")
-        session = await manager.session(mcp_name)
         result = await session.call(lambda s: s.list_tools())
         available = _filter_tools_by_scope(mcp_name, result.tools)
         if pattern is None:
@@ -653,10 +684,10 @@ async def _search_tools(manager: SessionManager, arguments: dict[str, Any]) -> t
     catalogs: list[tuple[str, list[types.Tool]]] = []
     unreachable: list[dict[str, str]] = []
     for summary in scan:
-        if not _offers(summary["name"], "tools"):
-            continue
         try:
-            session = await manager.session(summary["name"])
+            session = await _connect_offering(manager, summary["name"], "tools")
+            if session is None:
+                continue
             result = await session.call(lambda s: s.list_tools())
         except Exception as exc:  # noqa: BLE001 - one bad server must not fail a search
             unreachable.append(
@@ -705,13 +736,13 @@ async def _run_mcp_tool(manager: SessionManager, arguments: dict[str, Any]) -> t
     if not mcp_name or not mcp_tool:
         return _error("mcp_name and mcp_tool are required.")
     _require_server_in_scope(mcp_name)
-    if not _offers(mcp_name, "tools"):
-        return _error(f"Server {mcp_name!r} does not offer tools.")
     _require_tool_in_scope(mcp_name, mcp_tool)
     tool_args = arguments.get("arguments") or {}
     if not isinstance(tool_args, dict):
         return _error("arguments must be an object.")
-    session = await manager.session(mcp_name)
+    session = await _connect_offering(manager, mcp_name, "tools")
+    if session is None:
+        return _error(f"Server {mcp_name!r} does not offer tools.")
     return await session.call(lambda s: s.call_tool(mcp_tool, arguments=tool_args))
 
 
@@ -810,9 +841,9 @@ async def _search_resources(
 
     if mcp_name:
         _require_server_in_scope(mcp_name)
-        if not _offers(mcp_name, "resources"):
+        session = await _connect_offering(manager, mcp_name, "resources")
+        if session is None:
             return _error(f"Server {mcp_name!r} does not offer resources.")
-        session = await manager.session(mcp_name)
         entries = await _resource_entries(session, mcp_name)
         if pattern is not None:
             entries = [
@@ -834,10 +865,10 @@ async def _search_resources(
     entries = []
     unreachable: list[dict[str, str]] = []
     for summary in _visible_server_summaries(manager):
-        if not _offers(summary["name"], "resources"):
-            continue
         try:
-            session = await manager.session(summary["name"])
+            session = await _connect_offering(manager, summary["name"], "resources")
+            if session is None:
+                continue
             found = await _resource_entries(session, summary["name"])
         except Exception as exc:  # noqa: BLE001 - one bad server must not fail a search
             unreachable.append(
@@ -880,10 +911,10 @@ async def _read_resource(
     if not mcp_name or not uri:
         return _error("mcp_name and uri are required.")
     _require_server_in_scope(mcp_name)
-    if not _offers(mcp_name, "resources"):
-        return _error(f"Server {mcp_name!r} does not offer resources.")
     _require_resource_in_scope(mcp_name, uri)
-    session = await manager.session(mcp_name)
+    session = await _connect_offering(manager, mcp_name, "resources")
+    if session is None:
+        return _error(f"Server {mcp_name!r} does not offer resources.")
     result = await session.call(lambda s: s.read_resource(uri))
     return types.CallToolResult(
         content=[
