@@ -194,6 +194,72 @@ async def test_resource_template_pattern_in_scope(tmp_path: Path):
         assert denied.isError is True
 
 
+async def test_resource_template_bare_placeholder_stays_in_one_segment(tmp_path: Path):
+    config = _write_config(
+        tmp_path,
+        {"surface": _local(SURFACE, "resources")},
+        scopes={"item": {"surface": {"resources": ["surface://item/{id}"]}}},
+        version=2,
+    )
+    async with _router(config, "item") as session:
+        entries = await _search(session, {"mcp_name": "surface"})
+        assert [entry["name"] for entry in entries] == ["item"]
+
+        allowed = await session.call_tool(
+            "read_resource", {"mcp_name": "surface", "uri": "surface://item/7"}
+        )
+        assert allowed.isError is False
+
+        nested = await session.call_tool(
+            "read_resource",
+            {"mcp_name": "surface", "uri": "surface://item/7/secret"},
+        )
+        assert nested.isError is True
+        assert "not available" in nested.content[0].text
+
+
+async def test_resource_template_plus_placeholder_spans_segments(tmp_path: Path):
+    config = _write_config(
+        tmp_path,
+        {"surface": _local(SURFACE, "resources")},
+        scopes={"item": {"surface": {"resources": ["surface://item/{+path}"]}}},
+        version=2,
+    )
+    async with _router(config, "item") as session:
+        allowed = await session.call_tool(
+            "read_resource",
+            {"mcp_name": "surface", "uri": "surface://item/7/secret"},
+        )
+        assert allowed.isError is False
+
+        outside = await session.call_tool(
+            "read_resource", {"mcp_name": "surface", "uri": "surface://doc"}
+        )
+        assert outside.isError is True
+        assert "not available" in outside.content[0].text
+
+
+async def test_resource_template_slash_placeholder_matches_slash_segments(tmp_path: Path):
+    config = _write_config(
+        tmp_path,
+        {"surface": _local(SURFACE, "resources")},
+        scopes={"item": {"surface": {"resources": ["surface://item{/path}"]}}},
+        version=2,
+    )
+    async with _router(config, "item") as session:
+        for uri in ("surface://item", "surface://item/7", "surface://item/7/8"):
+            allowed = await session.call_tool(
+                "read_resource", {"mcp_name": "surface", "uri": uri}
+            )
+            assert allowed.isError is False, uri
+
+        outside = await session.call_tool(
+            "read_resource", {"mcp_name": "surface", "uri": "surface://doc"}
+        )
+        assert outside.isError is True
+        assert "not available" in outside.content[0].text
+
+
 async def test_resource_scope_exact_entry_matches_only_itself(tmp_path: Path):
     config = _write_config(
         tmp_path,

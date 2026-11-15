@@ -79,8 +79,10 @@ closed, so gaining a resource category never widens an existing scope.
 Tools and prompts are matched by name. Resources are matched by URI: a literal
 entry matches exactly that URI, an entry ending in `/` (such as `tickets://`)
 matches that prefix, and a template such as `docs://{path}` matches concrete
-URIs in that shape. Resources have no stable name to match by, so the URI is
-the only honest key.
+URIs in that shape. Template expressions follow RFC 6570 expansion: a bare
+`{var}` matches one path segment, `{+var}` matches across segments, and
+`{/var}` matches slash-prefixed segments. Resources have no stable name to
+match by, so the URI is the only honest key.
 
 Version rule, kept consistent across `add`, `remove` and `dump_config`: reads
 accept version 1 and 2 and either entry shape; a write emits version 2 as soon
@@ -114,8 +116,9 @@ Three MCP features are deliberately not proxied:
 - Read results are returned as embedded resources, preserving the child's
   content blocks (text or blob) and MIME type rather than flattening them.
 - A resource scope entry grants exactly the URI it names unless it ends in `/`
-  (prefix) or carries `{...}` placeholders (template). Listing one URI never
-  authorizes a sibling that merely shares its prefix.
+  (prefix) or carries `{...}` placeholders (template, with RFC 6570 segment
+  semantics). Listing one URI never authorizes a sibling that merely shares its
+  prefix.
 - The startup probe is bounded by the connect timeout and parallel across
   servers, but a slow server still delays the router's first response.
 - The `prompts` scope key is parsed, validated and probed while no prompt tools

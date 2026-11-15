@@ -317,22 +317,38 @@ def _require_tool_in_scope(mcp_name: str, mcp_tool: str) -> None:
         )
 
 
-_TEMPLATE_PART = re.compile(r"\{[^}]*\}")
+_TEMPLATE_PART = re.compile(r"\{([^}]*)\}")
+
+
+def _template_matcher(placeholder: str) -> str:
+    """Regex for one URI-template expression, per RFC 6570 expansion.
+
+    A bare ``{var}`` expands to a single path segment, ``{+var}`` may span
+    segments, and ``{/var}`` expands to slash-prefixed segments.
+    """
+    if placeholder.startswith("+"):
+        return ".*"
+    if placeholder.startswith("/"):
+        return r"(?:/[^/]*)*"
+    return "[^/]*"
 
 
 def _resource_pattern(entry: str) -> re.Pattern[str]:
     """Compile a resource allow-list entry into a URI matcher.
 
     A literal URI matches only itself. A trailing ``/`` opts into prefix
-    matching, and ``{...}`` placeholders make it a template over concrete URIs.
-    Scope resources are patterns, not names, because MCP resources have no
-    stable name.
+    matching, and ``{...}`` placeholders make it a template over concrete URIs
+    with RFC 6570 segment semantics. Scope resources are patterns, not names,
+    because MCP resources have no stable name.
     """
     parts = _TEMPLATE_PART.split(entry)
     if len(parts) > 1:
-        return re.compile(
-            "^" + ".*".join(re.escape(part) for part in parts) + r"\Z"
-        )
+        pattern = "^"
+        for index, part in enumerate(parts):
+            pattern += (
+                _template_matcher(part) if index % 2 else re.escape(part)
+            )
+        return re.compile(pattern + r"\Z")
     if entry.endswith("/"):
         return re.compile("^" + re.escape(entry))
     return re.compile("^" + re.escape(entry) + r"\Z")
