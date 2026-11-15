@@ -235,7 +235,8 @@ uv run python scripts/context_benchmark.py --mode registration
 
 Registration-only and end-to-end measure different things, and the code reports
 both. Example run with `openai/gpt-6-luna` (absolute counts vary by model and
-provider):
+provider). The `tools` column is the total catalog behind the router (N × 12
+tools per server), added for scale:
 
 ```text
 Registration-only (what the tool catalog costs before any work)
