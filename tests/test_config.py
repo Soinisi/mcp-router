@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import pytest
+import yaml
 
 from mcp_router.config import (
     ConfigError,
     LocalServer,
     RemoteServer,
+    ScopeEntry,
     build_environ,
+    dump_config,
     load_config,
     parse_config,
     resolve_config,
@@ -52,7 +55,7 @@ def test_remote_requires_url():
 
 def test_bad_version_rejected():
     with pytest.raises(ConfigError, match="version"):
-        parse_config({"version": 2, "mcp_servers": {}})
+        parse_config({"version": 3, "mcp_servers": {}})
 
 
 def test_env_expansion_at_resolve_time():
@@ -101,9 +104,96 @@ def test_scopes_parse_and_resolve():
             },
         }
     )
-    assert config.resolve_scope("support") == {"tickets": None}
-    assert config.resolve_scope("readonly") == {"tickets": ["get_ticket"]}
+    assert config.resolve_scope("support") == {
+        "tickets": ScopeEntry(tools=None, resources=[], prompts=[])
+    }
+    assert config.resolve_scope("readonly") == {
+        "tickets": ScopeEntry(tools=["get_ticket"], resources=[], prompts=[])
+    }
     assert config.resolve_scope(None) is None
+
+
+def test_scope_v2_mapping_parses_each_category():
+    config = parse_config(
+        {
+            "version": 2,
+            "mcp_servers": {"tickets": {"type": "local", "command": "true"}},
+            "scopes": {
+                "support": {
+                    "tickets": {
+                        "tools": ["get_ticket"],
+                        "resources": ["tickets://"],
+                        "prompts": None,
+                    }
+                }
+            },
+        }
+    )
+    entry = config.resolve_scope("support")["tickets"]
+    assert entry.tools == ["get_ticket"]
+    assert entry.resources == ["tickets://"]
+    assert entry.prompts is None
+
+
+def test_scope_v2_omitted_category_allows_none():
+    config = parse_config(
+        {
+            "version": 2,
+            "mcp_servers": {"tickets": {"type": "local", "command": "true"}},
+            "scopes": {"support": {"tickets": {"tools": None}}},
+        }
+    )
+    entry = config.resolve_scope("support")["tickets"]
+    assert entry.tools is None
+    assert entry.resources == []
+    assert entry.prompts == []
+
+
+def test_scope_v2_rejects_unknown_category():
+    with pytest.raises(ConfigError, match="extra_forbidden|Extra inputs"):
+        parse_config(
+            {
+                "version": 2,
+                "mcp_servers": {"t": {"type": "local", "command": "true"}},
+                "scopes": {"x": {"t": {"tools": [], "subscriptions": []}}},
+            }
+        )
+
+
+def test_scope_v2_rejects_empty_resource_pattern():
+    with pytest.raises(ConfigError, match="empty resource pattern"):
+        parse_config(
+            {
+                "version": 2,
+                "mcp_servers": {"t": {"type": "local", "command": "true"}},
+                "scopes": {"x": {"t": {"resources": [" "]}}},
+            }
+        )
+
+
+def test_scope_v1_still_accepts_bare_lists_and_null():
+    config = parse_config(
+        {
+            "version": 1,
+            "mcp_servers": {"t": {"type": "local", "command": "true"}},
+            "scopes": {
+                "all": {"t": None},
+                "some": {"t": ["echo"]},
+                "none": {"t": []},
+            },
+        }
+    )
+    assert config.resolve_scope("all")["t"].tools is None
+    assert config.resolve_scope("some")["t"].tools == ["echo"]
+    assert config.resolve_scope("none")["t"].tools == []
+    # v1 has no resource or prompt allow-list, so those categories are closed.
+    assert config.resolve_scope("some")["t"].resources == []
+    assert config.resolve_scope("some")["t"].prompts == []
+
+
+def test_v2_config_accepted():
+    config = parse_config({"version": 2, "mcp_servers": {}})
+    assert config.version == 2
 
 
 def test_resolve_config_preserves_scopes():
@@ -114,8 +204,12 @@ def test_resolve_config_preserves_scopes():
         }
     )
     resolved = resolve_config(config, {})
-    assert resolved.scopes == {"support": {"tickets": None}}
-    assert resolved.resolve_scope("support") == {"tickets": None}
+    assert resolved.scopes == {
+        "support": {"tickets": ScopeEntry(tools=None, resources=[], prompts=[])}
+    }
+    assert resolved.resolve_scope("support") == {
+        "tickets": ScopeEntry(tools=None, resources=[], prompts=[])
+    }
 
 
 def test_scope_unknown_server_rejected():
@@ -140,7 +234,7 @@ def test_scope_empty_tool_list_means_no_tools():
             "scopes": {"x": {"t": []}},
         }
     )
-    assert config.resolve_scope("x") == {"t": []}
+    assert config.resolve_scope("x")["t"].tools == []
 
 
 def test_unknown_scope_raises():
@@ -180,7 +274,52 @@ scopes:
     loaded = load_config([user, project], environ={})
 
     assert loaded.config.resolve_scope("support") == {
-        "tickets": None,
-        "docs": None,
+        "tickets": ScopeEntry(tools=None, resources=[], prompts=[]),
+        "docs": ScopeEntry(tools=None, resources=[], prompts=[]),
     }
-    assert loaded.config.resolve_scope("override") == {"tickets": ["get_ticket"]}
+    assert loaded.config.resolve_scope("override") == {
+        "tickets": ScopeEntry(tools=["get_ticket"], resources=[], prompts=[])
+    }
+
+
+def test_dump_config_keeps_v1_shape():
+    config = parse_config(
+        {
+            "version": 1,
+            "mcp_servers": {"t": {"type": "local", "command": "true"}},
+            "scopes": {"x": {"t": ["echo"]}},
+        }
+    )
+    dump = yaml.safe_load(dump_config(config))
+    assert dump["version"] == 1
+    assert dump["scopes"] == {"x": {"t": ["echo"]}}
+
+
+def test_dump_config_writes_v2_for_per_category_scopes():
+    config = parse_config(
+        {
+            "version": 2,
+            "mcp_servers": {"t": {"type": "local", "command": "true"}},
+            "scopes": {"x": {"t": {"tools": ["echo"], "resources": ["docs://"]}}},
+        }
+    )
+    dump = yaml.safe_load(dump_config(config))
+    assert dump["version"] == 2
+    assert dump["scopes"]["x"]["t"] == {
+        "tools": ["echo"],
+        "resources": ["docs://"],
+        "prompts": [],
+    }
+
+
+def test_dump_config_bumps_version_for_category_values_in_v1_document():
+    config = parse_config(
+        {
+            "version": 1,
+            "mcp_servers": {"t": {"type": "local", "command": "true"}},
+            "scopes": {"x": {"t": {"resources": ["docs://"]}}},
+        }
+    )
+    dump = yaml.safe_load(dump_config(config))
+    assert dump["version"] == 2
+    assert dump["scopes"]["x"]["t"]["resources"] == ["docs://"]

@@ -16,7 +16,7 @@ from typing import Annotated, Any, Literal, Union
 import yaml
 from dotenv import dotenv_values
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
-from pydantic import TypeAdapter
+from pydantic import BeforeValidator, TypeAdapter
 
 ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
@@ -52,16 +52,58 @@ class RemoteServer(BaseModel):
 
 Server = Annotated[Union[LocalServer, RemoteServer], Field(discriminator="type")]
 
+#: The MCP surface categories a scope can allow-list.
+SCOPE_CATEGORIES = ("tools", "resources", "prompts")
+
+_CATEGORY_LABELS = {
+    "tools": "tool name",
+    "resources": "resource pattern",
+    "prompts": "prompt name",
+}
+
+
+class ScopeEntry(BaseModel):
+    """Per-server allow-lists for one scope, split by MCP surface category.
+
+    ``None`` means every item in that category is allowed, a list allows only
+    the named items, and an empty list allows none. A category omitted from a
+    mapping entry allows none: a scope is an allow-list, so an absent category
+    cannot silently widen access. The legacy bare-list form (and a bare
+    ``null``) is read as ``tools: [...]`` / ``tools: null`` with resources and
+    prompts empty.
+
+    Tool and prompt entries are names; resource entries are URI patterns
+    (a literal prefix, or a template such as ``docs://{path}``).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tools: list[str] | None = Field(default_factory=list)
+    resources: list[str] | None = Field(default_factory=list)
+    prompts: list[str] | None = Field(default_factory=list)
+
+
+def _normalise_scope_entry(value: Any) -> Any:
+    """Read a v1 scope entry as the v2 per-category shape."""
+    if value is None:
+        return {"tools": None}
+    if isinstance(value, list):
+        return {"tools": value}
+    return value
+
+
+ScopeEntryInput = Annotated[ScopeEntry, BeforeValidator(_normalise_scope_entry)]
+
 
 class RouterConfig(BaseModel):
     """The whole router configuration document."""
 
     model_config = ConfigDict(extra="forbid")
 
-    version: Literal[1] = 1
+    version: Literal[1, 2] = 1
     mcp_servers: dict[str, Server] = Field(default_factory=dict)
-    # scope name -> {server name -> allowed tools}; None means every tool.
-    scopes: dict[str, dict[str, list[str] | None]] = Field(default_factory=dict)
+    # scope name -> {server name -> per-category allow-lists}
+    scopes: dict[str, dict[str, ScopeEntryInput]] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _validate_scopes(self) -> "RouterConfig":
@@ -72,21 +114,24 @@ class RouterConfig(BaseModel):
                     f"scope {scope_name!r} references unknown server(s): "
                     f"{', '.join(sorted(unknown))}"
                 )
-            for server_name, tools in scope.items():
-                if tools is None:
-                    continue
-                cleaned = [tool.strip() for tool in tools]
-                if any(not tool for tool in cleaned):
-                    raise ValueError(
-                        f"scope {scope_name!r}.{server_name!r} has an empty tool name"
-                    )
-                scope[server_name] = list(dict.fromkeys(cleaned))
+            for server_name, entry in scope.items():
+                for category in SCOPE_CATEGORIES:
+                    values = getattr(entry, category)
+                    if values is None:
+                        continue
+                    cleaned = [value.strip() for value in values]
+                    if any(not value for value in cleaned):
+                        raise ValueError(
+                            f"scope {scope_name!r}.{server_name!r} has an empty "
+                            f"{_CATEGORY_LABELS[category]}"
+                        )
+                    setattr(entry, category, list(dict.fromkeys(cleaned)))
         return self
 
     def names(self) -> list[str]:
         return sorted(self.mcp_servers)
 
-    def resolve_scope(self, name: str | None) -> dict[str, list[str] | None] | None:
+    def resolve_scope(self, name: str | None) -> dict[str, ScopeEntry] | None:
         """Return the named scope, or ``None`` for the unrestricted view."""
         if not name:
             return None
@@ -192,7 +237,13 @@ def resolve_config(config: RouterConfig, environ: dict[str, str]) -> RouterConfi
         {
             "version": config.version,
             "mcp_servers": _expand(servers, environ),
-            "scopes": config.scopes,
+            "scopes": {
+                scope_name: {
+                    server_name: entry.model_dump()
+                    for server_name, entry in scope.items()
+                }
+                for scope_name, scope in config.scopes.items()
+            },
         }
     )
 
@@ -251,8 +302,12 @@ def load_config(
     for path in existing:
         data = _read_yaml(path)
         version = data.get("version", 1)
-        if version != 1:
-            raise ConfigError(f"Unsupported config version {version!r} in {path} (expected 1).")
+        if version not in (1, 2):
+            raise ConfigError(
+                f"Unsupported config version {version!r} in {path} "
+                "(expected 1 or 2)."
+            )
+        merged["version"] = max(merged["version"], version)
         servers = data.get("mcp_servers", {})
         if not isinstance(servers, dict):
             raise ConfigError(f"'mcp_servers' must be a mapping in {path}.")
@@ -275,12 +330,54 @@ def load_config(
     return LoadedConfig(config=config, sources=existing, environ=env)
 
 
+def scope_uses_categories(scopes: Any) -> bool:
+    """True when any raw scope entry uses the v2 per-category mapping shape."""
+    if not isinstance(scopes, dict):
+        return False
+    for entries in scopes.values():
+        if isinstance(entries, dict) and any(
+            isinstance(entry, dict) for entry in entries.values()
+        ):
+            return True
+    return False
+
+
+def _serialise_scopes(config: RouterConfig) -> tuple[int, dict[str, dict[str, Any]]]:
+    """Scope payload plus the version its shape requires.
+
+    Rule: a document is written as version 2 as soon as it contains (or asks
+    for) the per-category mapping shape; otherwise it keeps the declared
+    version and the legacy bare-list shape. A parsed v2 config therefore stays
+    v2 on write, and a parsed v1 config stays v1.
+    """
+    needs_v2 = config.version == 2 or any(
+        entry.resources != [] or entry.prompts != []
+        for scope in config.scopes.values()
+        for entry in scope.values()
+    )
+    version = 2 if needs_v2 else 1
+
+    payload: dict[str, dict[str, Any]] = {}
+    for scope_name, entries in config.scopes.items():
+        scope_payload: dict[str, Any] = {}
+        for server_name, entry in entries.items():
+            if version == 2:
+                scope_payload[server_name] = entry.model_dump()
+            elif entry.tools is None:
+                scope_payload[server_name] = None
+            else:
+                scope_payload[server_name] = list(entry.tools)
+        payload[scope_name] = scope_payload
+    return version, payload
+
+
 def dump_config(config: RouterConfig) -> str:
     """Serialise a config back to YAML (secrets are stored as ``${VAR}``)."""
+    version, scopes = _serialise_scopes(config)
     payload: dict[str, Any] = {
-        "version": config.version,
+        "version": version,
         "mcp_servers": config.model_dump(exclude_none=True)["mcp_servers"],
     }
-    if config.scopes:
-        payload["scopes"] = config.scopes
+    if scopes:
+        payload["scopes"] = scopes
     return yaml.safe_dump(payload, sort_keys=True, default_flow_style=False)

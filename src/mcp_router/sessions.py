@@ -98,6 +98,9 @@ class ServerSession:
         self._task: asyncio.Task[None] | None = None
         self._ready = asyncio.Event()
         self._error: BaseException | None = None
+        #: Advertised capabilities from the initialize handshake, set once the
+        #: owning task has connected (and before ``start()`` returns).
+        self.capabilities: Any | None = None
 
     async def start(self) -> None:
         self._task = asyncio.create_task(self._run(), name=f"mcp-router:{self.name}")
@@ -116,6 +119,7 @@ class ServerSession:
                 read, write = await stack.enter_async_context(_connect(resolved))
                 session = await stack.enter_async_context(ClientSession(read, write))
                 await session.initialize()
+                self.capabilities = session.get_server_capabilities()
                 self._ready.set()
                 while True:
                     item = await self._queue.get()

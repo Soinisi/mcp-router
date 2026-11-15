@@ -39,7 +39,7 @@ Resolving `${VAR}` placeholders in a spec from the environment and `.env` at con
 _Avoid_: env substitution, interpolation
 
 **Scope**:
-A named, per-connection allow-list of registered servers and optionally their tools.
+A named, per-connection allow-list of registered servers and optionally their tools, resources and prompts.
 _Avoid_: profile, role, permission set
 
 **Config target**:

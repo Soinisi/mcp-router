@@ -4,7 +4,7 @@ import pytest
 import yaml
 
 from mcp_router import config as config_mod
-from mcp_router.config import ConfigError, load_config
+from mcp_router.config import ConfigError, ScopeEntry, load_config
 from mcp_router.registry import add_server, remove_server, server_summaries
 
 
@@ -77,9 +77,62 @@ def test_remove_cascades_into_scopes(user_config):
     loaded = load_config(environ={})
     assert set(loaded.config.mcp_servers) == {"docs"}
     assert loaded.config.scopes == {
-        "mixed": {"docs": None},
-        "docs-only": {"docs": []},
+        "mixed": {"docs": ScopeEntry(tools=None, resources=[], prompts=[])},
+        "docs-only": {"docs": ScopeEntry(tools=[], resources=[], prompts=[])},
     }
+
+
+def test_write_keeps_v1_when_scopes_use_the_legacy_shape(user_config):
+    user_config.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "mcp_servers": {},
+                "scopes": {"support": {"tickets": ["get_ticket"]}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    add_server("tickets", {"type": "local", "command": "a"})
+
+    raw = yaml.safe_load(user_config.read_text(encoding="utf-8"))
+    assert raw["version"] == 1
+    assert raw["scopes"]["support"]["tickets"] == ["get_ticket"]
+
+
+def test_write_upgrades_version_for_per_category_scopes(user_config):
+    user_config.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "mcp_servers": {"tickets": {"type": "local", "command": "a"}},
+                "scopes": {
+                    "support": {
+                        "tickets": {"tools": ["get_ticket"], "resources": ["tickets://"]}
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    add_server("docs", {"type": "local", "command": "b"})
+
+    raw = yaml.safe_load(user_config.read_text(encoding="utf-8"))
+    assert raw["version"] == 2
+    assert raw["scopes"]["support"]["tickets"]["resources"] == ["tickets://"]
+
+
+def test_write_preserves_declared_v2(user_config):
+    add_server("tickets", {"type": "local", "command": "a"})
+    raw = yaml.safe_load(user_config.read_text(encoding="utf-8"))
+    raw["version"] = 2
+    raw["scopes"] = {"support": {"tickets": None}}
+    user_config.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    add_server("docs", {"type": "local", "command": "b"})
+
+    written = yaml.safe_load(user_config.read_text(encoding="utf-8"))
+    assert written["version"] == 2
 
 
 def test_remove_refuses_when_sibling_scope_references_server(
@@ -158,7 +211,7 @@ def test_remove_project_allows_when_user_still_defines_server(
     assert remove_server("tickets", target="project") == []
     loaded = load_config(environ={})
     assert loaded.config.mcp_servers["tickets"].command == "user"
-    assert loaded.config.scopes["support"]["tickets"] is None
+    assert loaded.config.scopes["support"]["tickets"].tools is None
 
 
 def test_remove_user_allows_when_project_still_defines_server(
@@ -183,7 +236,7 @@ def test_remove_user_allows_when_project_still_defines_server(
     assert remove_server("tickets") == []
     loaded = load_config(environ={})
     assert loaded.config.mcp_servers["tickets"].command == "project"
-    assert loaded.config.scopes["support"]["tickets"] is None
+    assert loaded.config.scopes["support"]["tickets"].tools is None
 
 
 def test_project_override(tmp_path, monkeypatch):

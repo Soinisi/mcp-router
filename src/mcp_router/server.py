@@ -1,8 +1,10 @@
-"""The router's MCP surface: exactly three read/run tools.
+"""The router's MCP surface: discovery and proxy tools over tools and resources.
 
-Using the low-level server (rather than FastMCP) lets us return a child's
-``CallToolResult`` verbatim, so the agent sees exactly what it would have seen
-had it connected to that server directly.
+The surface is dynamic: a category's tools are exposed only when at least one
+registered server advertises that capability, detected by an eager probe at
+startup and cached for the session. Using the low-level server (rather than
+FastMCP) lets us return a child's ``CallToolResult`` verbatim, so the agent sees
+exactly what it would have seen had it connected to that server directly.
 """
 
 from __future__ import annotations
@@ -18,12 +20,16 @@ import mcp.types as types
 from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 
-from .config import ConfigError, load_config
+from .config import ConfigError, ScopeEntry, load_config
 from .registry import server_summaries
-from .sessions import DEFAULT_TIMEOUT, SessionManager
+from .sessions import DEFAULT_TIMEOUT, ServerSession, SessionManager
 
 #: A broad search must not dump an unbounded catalog into the agent's context.
 MAX_SEARCH_RESULTS = 50
+
+#: Categories of the server->client surface the router fronts. ``prompts`` is
+#: probed and scope-filtered now, but its tools arrive in a later ship.
+CAPABILITY_CATEGORIES = ("tools", "resources", "prompts")
 
 #: Words ignored when a whitespace-separated search phrase is retried as an
 #: OR of its terms. Only used after the literal regex matched nothing.
@@ -34,18 +40,22 @@ _SEARCH_STOPWORDS = {
 
 _INSTRUCTIONS = (
     "This is an MCP router. You are connected to one server that fronts many "
-    "others. Discover tools at runtime:\n"
+    "others. The tools available here follow what the registered servers "
+    "offer: tool discovery/run appears when any server offers tools, resource "
+    "discovery/read when any server offers resources. Discover at runtime:\n"
     "  1. search_tools(regex_filter?, mcp_name?, full?) -> tools matching your "
     "filter. Pass a tool name or action keyword as regex_filter; pass mcp_name "
     "when you know the server. With neither it lists the servers (browse). "
     "This is normally your first call.\n"
     "  2. run_mcp_tool(mcp_name, mcp_tool, arguments) -> invoke one of them.\n"
+    "  3. search_resources(regex_filter?, mcp_name?) -> resources and resource "
+    "templates matching your filter.\n"
+    "  4. read_resource(mcp_name, uri) -> read one resource.\n"
     "get_installed_mcps lists server names, descriptions and reachability; use "
     "it only when you need that list or a reachability check."
 )
 
-_TOOLS: list[types.Tool] = [
-    types.Tool(
+_GET_INSTALLED_MCPS = types.Tool(
         name="get_installed_mcps",
         description=(
             "List the MCP servers available to this connection (all registered "
@@ -74,8 +84,9 @@ _TOOLS: list[types.Tool] = [
             },
             "required": [],
         },
-    ),
-    types.Tool(
+)
+
+_SEARCH_TOOLS = types.Tool(
         name="search_tools",
         description=(
             "Search the tools exposed by the registered servers that the active "
@@ -119,8 +130,9 @@ _TOOLS: list[types.Tool] = [
             },
             "required": [],
         },
-    ),
-    types.Tool(
+)
+
+_RUN_MCP_TOOL = types.Tool(
         name="run_mcp_tool",
         description=(
             "Invoke a tool on a registered server, if the active scope allows "
@@ -146,13 +158,90 @@ _TOOLS: list[types.Tool] = [
             },
             "required": ["mcp_name", "mcp_tool"],
         },
+)
+
+_SEARCH_RESOURCES = types.Tool(
+    name="search_resources",
+    description=(
+        "Search the resources and resource templates exposed by the registered "
+        "servers that the active scope allows. Pass regex_filter to match "
+        "resource names, descriptions and URIs. With mcp_name, search that one "
+        "server; without it, search every scope-visible server and tag each "
+        "result with its mcp_name. Cross-server results have the shape "
+        "{resources: [...], unreachable_servers: [...]}. Results are compact "
+        "{mcp_name, name, uri, description, mimeType} summaries; a resource "
+        "template also carries template=true and its uriTemplate as uri. Use "
+        "read_resource to read one."
     ),
-]
+    inputSchema={
+        "type": "object",
+        "properties": {
+            "regex_filter": {
+                "type": "string",
+                "description": (
+                    "Case-insensitive regex matched against resource names, "
+                    "descriptions and URIs."
+                ),
+            },
+            "mcp_name": {
+                "type": "string",
+                "description": (
+                    "A server name from get_installed_mcps. Omit to search all "
+                    "scope-visible servers."
+                ),
+            },
+        },
+        "required": [],
+    },
+)
+
+_READ_RESOURCE = types.Tool(
+    name="read_resource",
+    description=(
+        "Read one resource from a registered server, if the active scope allows "
+        "its URI. Pass mcp_name and uri (or an expanded uriTemplate) from "
+        "search_resources. Returns the resource contents verbatim as embedded "
+        "resources."
+    ),
+    inputSchema={
+        "type": "object",
+        "properties": {
+            "mcp_name": {
+                "type": "string",
+                "description": "A server name from get_installed_mcps or search_resources.",
+            },
+            "uri": {
+                "type": "string",
+                "description": "A resource URI from search_resources.",
+            },
+        },
+        "required": ["mcp_name", "uri"],
+    },
+)
+
+
+def _build_tools(capabilities: dict[str, bool]) -> list[types.Tool]:
+    """The router's tool list for the capabilities its servers advertise."""
+    tools = [_GET_INSTALLED_MCPS]
+    if capabilities.get("tools"):
+        tools.extend([_SEARCH_TOOLS, _RUN_MCP_TOOL])
+    if capabilities.get("resources"):
+        tools.extend([_SEARCH_RESOURCES, _READ_RESOURCE])
+    # Prompt tools arrive in a later ship; the ``prompts`` scope key is already
+    # parsed and probed so the surface can be added without a schema change.
+    return tools
 
 _manager: SessionManager | None = None
 _timeout: float = DEFAULT_TIMEOUT
 _scope_name: str | None = None
-_scope: dict[str, list[str] | None] | None = None
+_scope: dict[str, ScopeEntry] | None = None
+_capabilities: dict[str, bool] = {category: False for category in CAPABILITY_CATEGORIES}
+#: Per-server advertised categories, used to skip or explain a category a
+#: specific server does not offer. Servers missing here were unreachable at
+#: probe time and are still retried lazily.
+_server_capabilities: dict[str, set[str]] = {}
+_tools: list[types.Tool] = []
+_probe_errors: dict[str, str] = {}
 
 
 def _text(content: str) -> types.CallToolResult:
@@ -194,7 +283,29 @@ def _require_server_in_scope(mcp_name: str) -> None:
 def _scope_tools(mcp_name: str) -> list[str] | None:
     if _scope is None:
         return None
-    return _scope.get(mcp_name)
+    entry = _scope.get(mcp_name)
+    if entry is None:
+        return None
+    return entry.tools
+
+
+def _scope_resources(mcp_name: str) -> list[str] | None:
+    if _scope is None:
+        return None
+    entry = _scope.get(mcp_name)
+    if entry is None:
+        return None
+    return entry.resources
+
+
+def _offers(mcp_name: str, category: str) -> bool:
+    """Whether a probed server advertises ``category``.
+
+    A server missing from the probe cache was unreachable at startup; it is
+    still attempted lazily, so it is not ruled out here.
+    """
+    categories = _server_capabilities.get(mcp_name)
+    return categories is None or category in categories
 
 
 def _require_tool_in_scope(mcp_name: str, mcp_tool: str) -> None:
@@ -202,6 +313,32 @@ def _require_tool_in_scope(mcp_name: str, mcp_tool: str) -> None:
     if allowed is not None and mcp_tool not in allowed:
         raise ConfigError(
             f"Tool {mcp_tool!r} is not available on server {mcp_name!r} in scope "
+            f"{_active_scope_label()!r}."
+        )
+
+
+def _resource_pattern(pattern: str) -> re.Pattern[str]:
+    """A URI allow-list entry as a prefix matcher.
+
+    A literal entry is a prefix; a template such as ``docs://{path}`` matches
+    any concrete URI in that shape. Scope resources are patterns, not names,
+    because MCP resources have no stable name.
+    """
+    parts = re.split(r"\{[^}]*\}", pattern)
+    return re.compile("^" + ".*".join(re.escape(part) for part in parts))
+
+
+def _resource_allowed(allowed: list[str] | None, *uris: str) -> bool:
+    if allowed is None:
+        return True
+    patterns = [_resource_pattern(pattern) for pattern in allowed]
+    return any(pattern.match(uri) for pattern in patterns for uri in uris)
+
+
+def _require_resource_in_scope(mcp_name: str, uri: str) -> None:
+    if not _resource_allowed(_scope_resources(mcp_name), uri):
+        raise ConfigError(
+            f"Resource {uri!r} is not available on server {mcp_name!r} in scope "
             f"{_active_scope_label()!r}."
         )
 
@@ -284,9 +421,47 @@ def _too_many_message(count: int, raw_filter: str | None) -> str:
     )
 
 
+async def _probe_capabilities(manager: SessionManager) -> None:
+    """Connect to each scope-visible server and cache the advertised surface.
+
+    A server that cannot connect is recorded in ``_probe_errors`` and simply
+    contributes no capabilities; the router must still start when one
+    registered server is down.
+    """
+    global _capabilities, _server_capabilities, _probe_errors
+    _capabilities = {category: False for category in CAPABILITY_CATEGORIES}
+    _server_capabilities = {}
+    _probe_errors = {}
+
+    async def probe(mcp_name: str) -> types.ServerCapabilities | None:
+        try:
+            session = await manager.session(mcp_name)
+        except Exception as exc:  # noqa: BLE001 - one bad server must not fail startup
+            _probe_errors[mcp_name] = f"{type(exc).__name__}: {exc}"
+            return None
+        return session.capabilities
+
+    summaries = _visible_server_summaries(manager)
+    names = [summary["name"] for summary in summaries]
+    results = await asyncio.gather(*(probe(name) for name in names))
+    for mcp_name, capabilities in zip(names, results):
+        if capabilities is None:
+            # Unreachable at probe time: leave it out of the cache so discovery
+            # still retries it and can report it as unreachable.
+            continue
+        offered = {
+            category
+            for category in CAPABILITY_CATEGORIES
+            if getattr(capabilities, category, None) is not None
+        }
+        _server_capabilities[mcp_name] = offered
+        for category in offered:
+            _capabilities[category] = True
+
+
 @asynccontextmanager
 async def _lifespan(server: Server) -> AsyncIterator[dict[str, Any]]:
-    global _manager, _scope
+    global _manager, _scope, _tools, _capabilities, _server_capabilities
     loaded = load_config()
     if not loaded.sources:
         raise ConfigError(
@@ -297,11 +472,21 @@ async def _lifespan(server: Server) -> AsyncIterator[dict[str, Any]]:
     _scope = loaded.config.resolve_scope(active_scope)
     _manager = SessionManager(loaded.config, environ=loaded.environ, timeout=_timeout)
     try:
-        yield {"config": loaded.config, "manager": _manager, "scope": _scope}
+        await _probe_capabilities(_manager)
+        _tools = _build_tools(_capabilities)
+        yield {
+            "config": loaded.config,
+            "manager": _manager,
+            "scope": _scope,
+            "capabilities": _capabilities,
+        }
     finally:
         await _manager.aclose()
         _manager = None
         _scope = None
+        _tools = []
+        _capabilities = {category: False for category in CAPABILITY_CATEGORIES}
+        _server_capabilities = {}
 
 
 def build_server() -> Server:
@@ -309,12 +494,14 @@ def build_server() -> Server:
 
     @server.list_tools()
     async def list_tools() -> list[types.Tool]:
-        return _TOOLS
+        return list(_tools)
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict[str, Any] | None) -> types.CallToolResult:
         assert _manager is not None
         arguments = arguments or {}
+        if name not in {tool.name for tool in _tools}:
+            return _error(f"Unknown tool {name!r}.")
         try:
             if name == "get_installed_mcps":
                 return await _get_installed_mcps(_manager, arguments)
@@ -322,6 +509,10 @@ def build_server() -> Server:
                 return await _search_tools(_manager, arguments)
             if name == "run_mcp_tool":
                 return await _run_mcp_tool(_manager, arguments)
+            if name == "search_resources":
+                return await _search_resources(_manager, arguments)
+            if name == "read_resource":
+                return await _read_resource(_manager, arguments)
             return _error(f"Unknown tool {name!r}.")
         except (ConfigError, ValueError, TimeoutError) as exc:
             return _error(str(exc))
@@ -342,15 +533,24 @@ async def _get_installed_mcps(manager: SessionManager, arguments: dict[str, Any]
             if _matches(pattern, s["name"], s.get("description"))
         ]
 
+    for summary in summaries:
+        error = _probe_errors.get(summary["name"])
+        if error is not None:
+            summary["reachable"] = False
+            summary["error"] = error
+
     if check:
         for summary in summaries:
             try:
                 session = await manager.session(summary["name"])
-                result = await session.call(lambda s: s.list_tools())
                 summary["reachable"] = True
-                summary["tool_count"] = len(
-                    _filter_tools_by_scope(summary["name"], result.tools)
-                )
+                if _offers(summary["name"], "tools"):
+                    result = await session.call(lambda s: s.list_tools())
+                    summary["tool_count"] = len(
+                        _filter_tools_by_scope(summary["name"], result.tools)
+                    )
+                else:
+                    summary["tool_count"] = 0
             except Exception as exc:  # noqa: BLE001
                 summary["reachable"] = False
                 summary["error"] = f"{type(exc).__name__}: {exc}"
@@ -366,6 +566,8 @@ async def _search_tools(manager: SessionManager, arguments: dict[str, Any]) -> t
 
     if mcp_name:
         _require_server_in_scope(mcp_name)
+        if not _offers(mcp_name, "tools"):
+            return _error(f"Server {mcp_name!r} does not offer tools.")
         session = await manager.session(mcp_name)
         result = await session.call(lambda s: s.list_tools())
         available = _filter_tools_by_scope(mcp_name, result.tools)
@@ -418,6 +620,8 @@ async def _search_tools(manager: SessionManager, arguments: dict[str, Any]) -> t
     catalogs: list[tuple[str, list[types.Tool]]] = []
     unreachable: list[dict[str, str]] = []
     for summary in scan:
+        if not _offers(summary["name"], "tools"):
+            continue
         try:
             session = await manager.session(summary["name"])
             result = await session.call(lambda s: s.list_tools())
@@ -468,12 +672,192 @@ async def _run_mcp_tool(manager: SessionManager, arguments: dict[str, Any]) -> t
     if not mcp_name or not mcp_tool:
         return _error("mcp_name and mcp_tool are required.")
     _require_server_in_scope(mcp_name)
+    if not _offers(mcp_name, "tools"):
+        return _error(f"Server {mcp_name!r} does not offer tools.")
     _require_tool_in_scope(mcp_name, mcp_tool)
     tool_args = arguments.get("arguments") or {}
     if not isinstance(tool_args, dict):
         return _error("arguments must be an object.")
     session = await manager.session(mcp_name)
     return await session.call(lambda s: s.call_tool(mcp_tool, arguments=tool_args))
+
+
+def _resource_entry(
+    mcp_name: str,
+    name: str,
+    uri: str,
+    description: str | None,
+    mime_type: str | None,
+    template: bool = False,
+) -> dict[str, Any]:
+    entry: dict[str, Any] = {
+        "mcp_name": mcp_name,
+        "name": name,
+        "uri": uri,
+        "description": description,
+        "mimeType": mime_type,
+    }
+    if template:
+        entry["template"] = True
+    return {key: value for key, value in entry.items() if value is not None}
+
+
+async def _resource_entries(
+    session: ServerSession, mcp_name: str
+) -> list[dict[str, Any]]:
+    """Compact, scope-filtered summaries of one server's resources + templates."""
+    resources = (await session.call(lambda s: s.list_resources())).resources
+    try:
+        templates = (
+            await session.call(lambda s: s.list_resource_templates())
+        ).resourceTemplates
+    except Exception:  # noqa: BLE001 - templates are optional; resources are not
+        templates = []
+    allowed = _scope_resources(mcp_name)
+
+    entries: list[dict[str, Any]] = []
+    for resource in resources:
+        uri = str(resource.uri)
+        if not _resource_allowed(allowed, uri):
+            continue
+        entries.append(
+            _resource_entry(
+                mcp_name,
+                resource.name,
+                uri,
+                resource.description,
+                resource.mimeType,
+            )
+        )
+    for template in templates:
+        uri = template.uriTemplate
+        if not _resource_allowed(allowed, uri):
+            continue
+        entries.append(
+            _resource_entry(
+                mcp_name,
+                template.name,
+                uri,
+                template.description,
+                template.mimeType,
+                template=True,
+            )
+        )
+    return entries
+
+
+def _no_resources_message(raw_filter: str | None, mcp_name: str | None = None) -> str:
+    where = f" on server {mcp_name!r}" if mcp_name else ""
+    if raw_filter is None:
+        return (
+            f"No resources are available{where}. The active scope may hide "
+            "them, or the server may expose none."
+        )
+    return (
+        f"No resources matched regex_filter {raw_filter!r}{where}. Try one "
+        "keyword (a resource name or URI fragment), or pass mcp_name to search "
+        "one server."
+    )
+
+
+def _too_many_resources_message(count: int, raw_filter: str | None) -> str:
+    return (
+        f"Too many matches ({count} resources) for regex_filter {raw_filter!r}; "
+        f"the limit is {MAX_SEARCH_RESULTS}. Narrow the filter (for example, "
+        "add a URI or name fragment) and try again."
+    )
+
+
+async def _search_resources(
+    manager: SessionManager, arguments: dict[str, Any]
+) -> types.CallToolResult:
+    mcp_name = arguments.get("mcp_name")
+    raw_filter = arguments.get("regex_filter")
+    pattern = _compile_filter(raw_filter)
+
+    if mcp_name:
+        _require_server_in_scope(mcp_name)
+        if not _offers(mcp_name, "resources"):
+            return _error(f"Server {mcp_name!r} does not offer resources.")
+        session = await manager.session(mcp_name)
+        entries = await _resource_entries(session, mcp_name)
+        if pattern is not None:
+            entries = [
+                entry
+                for entry in entries
+                if _matches(
+                    pattern,
+                    entry.get("name"),
+                    entry.get("description"),
+                    entry.get("uri"),
+                )
+            ]
+        if not entries:
+            return _error(_no_resources_message(raw_filter, mcp_name))
+        if len(entries) > MAX_SEARCH_RESULTS:
+            return _error(_too_many_resources_message(len(entries), raw_filter))
+        return _text(json.dumps(entries, separators=(",", ":")))
+
+    entries = []
+    unreachable: list[dict[str, str]] = []
+    for summary in _visible_server_summaries(manager):
+        if not _offers(summary["name"], "resources"):
+            continue
+        try:
+            session = await manager.session(summary["name"])
+            found = await _resource_entries(session, summary["name"])
+        except Exception as exc:  # noqa: BLE001 - one bad server must not fail a search
+            unreachable.append(
+                {
+                    "mcp_name": summary["name"],
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
+            continue
+        if pattern is not None:
+            found = [
+                entry
+                for entry in found
+                if _matches(
+                    pattern,
+                    entry.get("name"),
+                    entry.get("description"),
+                    entry.get("uri"),
+                )
+            ]
+        entries.extend(found)
+
+    if pattern is not None and not entries and not unreachable:
+        return _error(_no_resources_message(raw_filter))
+    if len(entries) > MAX_SEARCH_RESULTS:
+        return _error(_too_many_resources_message(len(entries), raw_filter))
+    return _text(
+        json.dumps(
+            {"resources": entries, "unreachable_servers": unreachable},
+            separators=(",", ":"),
+        )
+    )
+
+
+async def _read_resource(
+    manager: SessionManager, arguments: dict[str, Any]
+) -> types.CallToolResult:
+    mcp_name = arguments.get("mcp_name")
+    uri = arguments.get("uri")
+    if not mcp_name or not uri:
+        return _error("mcp_name and uri are required.")
+    _require_server_in_scope(mcp_name)
+    if not _offers(mcp_name, "resources"):
+        return _error(f"Server {mcp_name!r} does not offer resources.")
+    _require_resource_in_scope(mcp_name, uri)
+    session = await manager.session(mcp_name)
+    result = await session.call(lambda s: s.read_resource(uri))
+    return types.CallToolResult(
+        content=[
+            types.EmbeddedResource(type="resource", resource=content)
+            for content in result.contents
+        ]
+    )
 
 
 async def run_server(timeout: float = DEFAULT_TIMEOUT, scope: str | None = None) -> None:
