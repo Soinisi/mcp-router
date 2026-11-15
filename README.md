@@ -1,6 +1,50 @@
 # mcp-router
 
-One MCP server that dynamically discovers and proxies other MCP servers.
+**One MCP server that fronts many.** `mcp-router` is a Model Context Protocol
+router and proxy: connect your agent to this single MCP server and it discovers
+the tools of every server behind it on demand — instead of loading all of their
+tool definitions into the context window, and paying for them in tokens, on every
+step.
+
+![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
+
+## Why mcp-router
+
+- **One MCP server instead of many.** Register `mcp-router` once and list every
+  other MCP server in its config; it starts local servers over stdio and reaches
+  remote ones over HTTP or SSE.
+- **Dynamic tool discovery.** The agent searches for tools at runtime rather than
+  having every server's catalog installed up front, so it only pays for what it
+  looks up.
+- **Lower context and token cost.** The agent sees three tool definitions, not
+  every server's full catalog. In the [benchmark](#context-savings-benchmark)
+  sample run, registration-only input context falls 72.5% at 10 servers and an
+  end-to-end session saves 55.5% of its input tokens.
+- **Per-connection scopes.** Each client or project sees only the servers and
+  tools it needs, chosen by the launching environment.
+- **CLI-only registry changes.** Adding and removing servers is a command, never
+  a tool call, so it never occupies an agent's context.
+- **Works with any MCP client.** The router is a plain stdio MCP server, so
+  Claude, opencode, and other Model Context Protocol clients point at it the same
+  way.
+
+## Table of Contents
+
+- [Why mcp-router](#why-mcp-router)
+- [How it works](#how-it-works)
+- [Install](#install)
+- [Agent skill](#agent-skill)
+- [Configure](#configure)
+  - [Secrets](#secrets)
+  - [Scopes](#scopes)
+- [CLI](#cli)
+- [End-to-end tests](#end-to-end-tests)
+- [Context-savings benchmark](#context-savings-benchmark)
+  - [Analytical estimate](#analytical-estimate)
+- [Connecting a client](#connecting-a-client)
+- [Behaviour](#behaviour)
+
+## How it works
 
 Instead of connecting an agent to every MCP server (and paying for all their
 tools up front), connect it to `mcp-router` alone. The agent sees exactly three
@@ -191,26 +235,27 @@ uv run python scripts/context_benchmark.py --mode registration
 
 Registration-only and end-to-end measure different things, and the code reports
 both. Example run with `openai/gpt-6-luna` (absolute counts vary by model and
-provider):
+provider). The `tools` column is the total catalog behind the router (N × 12
+tools per server), added for scale:
 
 ```text
 Registration-only (what the tool catalog costs before any work)
 
-  N | direct tokens | router tokens |   saved | savings %
----------------------------------------------------------
-  1 |          2253 |          2225 |      28 |       1.2
-  3 |          3544 |          2223 |    1321 |      37.3
-  5 |          4825 |          2221 |    2604 |      54.0
- 10 |          8090 |          2223 |    5867 |      72.5
+  N | tools | direct tokens | router tokens |   saved | savings %
+-----------------------------------------------------------------
+  1 |    12 |          2253 |          2225 |      28 |       1.2
+  3 |    36 |          3544 |          2223 |    1321 |      37.3
+  5 |    60 |          4825 |          2221 |    2604 |      54.0
+ 10 |   120 |          8090 |          2223 |    5867 |      72.5
 
 End-to-end task (full session, discovery round-trips included)
 
-  N | direct tokens | router tokens |   saved | savings %
----------------------------------------------------------
-  1 |          4626 |          7106 |   -2480 |     -53.6
-  3 |          7232 |          7090 |     142 |       2.0
-  5 |          9798 |          7090 |    2708 |      27.6
- 10 |         16316 |          7260 |    9056 |      55.5
+  N | tools | direct tokens | router tokens |   saved | savings %
+-----------------------------------------------------------------
+  1 |    12 |          4626 |          7106 |   -2480 |     -53.6
+  3 |    36 |          7232 |          7090 |     142 |       2.0
+  5 |    60 |          9798 |          7090 |    2708 |      27.6
+ 10 |   120 |         16316 |          7260 |    9056 |      55.5
 ```
 
 This is the crossover the benchmark is meant to show: at small N the router's
