@@ -240,21 +240,21 @@ provider):
 ```text
 Registration-only (what the tool catalog costs before any work)
 
-  N | direct tokens | router tokens |   saved | savings %
----------------------------------------------------------
-  1 |          2253 |          2225 |      28 |       1.2
-  3 |          3544 |          2223 |    1321 |      37.3
-  5 |          4825 |          2221 |    2604 |      54.0
- 10 |          8090 |          2223 |    5867 |      72.5
+  N | tools | direct tokens | router tokens |   saved | savings %
+-----------------------------------------------------------------
+  1 |    12 |          2253 |          2225 |      28 |       1.2
+  3 |    36 |          3544 |          2223 |    1321 |      37.3
+  5 |    60 |          4825 |          2221 |    2604 |      54.0
+ 10 |   120 |          8090 |          2223 |    5867 |      72.5
 
 End-to-end task (full session, discovery round-trips included)
 
-  N | direct tokens | router tokens |   saved | savings %
----------------------------------------------------------
-  1 |          4626 |          7106 |   -2480 |     -53.6
-  3 |          7232 |          7090 |     142 |       2.0
-  5 |          9798 |          7090 |    2708 |      27.6
- 10 |         16316 |          7260 |    9056 |      55.5
+  N | tools | direct tokens | router tokens |   saved | savings %
+-----------------------------------------------------------------
+  1 |    12 |          4626 |          7106 |   -2480 |     -53.6
+  3 |    36 |          7232 |          7090 |     142 |       2.0
+  5 |    60 |          9798 |          7090 |    2708 |      27.6
+ 10 |   120 |         16316 |          7260 |    9056 |      55.5
 ```
 
 This is the crossover the benchmark is meant to show: at small N the router's
