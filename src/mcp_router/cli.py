@@ -16,6 +16,7 @@ import typer
 import yaml
 
 from .config import (
+    SCOPE_CATEGORIES,
     ConfigError,
     LoadedConfig,
     global_config_path,
@@ -61,7 +62,7 @@ def serve(
 
 @app.command()
 def scopes() -> None:
-    """List the configured scopes and their server/tool allow-lists."""
+    """List the configured scopes and their per-category allow-lists."""
     loaded = _load_or_fail()
     if not loaded.config.scopes:
         typer.echo("No scopes defined.")
@@ -73,14 +74,20 @@ def scopes() -> None:
             typer.echo("  (no servers)")
             continue
         for server in sorted(entries):
-            tools = entries[server]
-            if tools is None:
-                shown = "all tools"
-            elif tools:
-                shown = ", ".join(tools)
-            else:
-                shown = "no tools"
-            typer.echo(f"  {server}: {shown}")
+            entry = entries[server]
+            cells = "  ".join(
+                f"{category}={_format_scope_values(getattr(entry, category))}"
+                for category in SCOPE_CATEGORIES
+            )
+            typer.echo(f"  {server}: {cells}")
+
+
+def _format_scope_values(values: list[str] | None) -> str:
+    if values is None:
+        return "all"
+    if not values:
+        return "none"
+    return ", ".join(values)
 
 
 @app.command("list")

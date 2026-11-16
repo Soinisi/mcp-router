@@ -13,15 +13,15 @@ step.
 - **One MCP server instead of many.** Register `mcp-router` once and list every
   other MCP server in its config; it starts local servers over stdio and reaches
   remote ones over HTTP or SSE.
-- **Dynamic tool discovery.** The agent searches for tools at runtime rather than
-  having every server's catalog installed up front, so it only pays for what it
-  looks up.
-- **Lower context and token cost.** The agent sees three tool definitions, not
-  every server's full catalog. In the [benchmark](#context-savings-benchmark)
+- **Dynamic discovery.** The agent searches for tools and resources at runtime
+  rather than having every server's catalog installed up front, so it only pays
+  for what it looks up.
+- **Lower context and token cost.** The agent sees a few router tool definitions,
+  not every server's full catalog. In the [benchmark](#context-savings-benchmark)
   sample run, registration-only input context falls 72.5% at 10 servers and an
   end-to-end session saves 55.5% of its input tokens.
 - **Per-connection scopes.** Each client or project sees only the servers and
-  tools it needs, chosen by the launching environment.
+  tools, resources and prompts it needs, chosen by the launching environment.
 - **CLI-only registry changes.** Adding and removing servers is a command, never
   a tool call, so it never occupies an agent's context.
 - **Works with any MCP client.** The router is a plain stdio MCP server, so
@@ -47,8 +47,11 @@ step.
 ## How it works
 
 Instead of connecting an agent to every MCP server (and paying for all their
-tools up front), connect it to `mcp-router` alone. The agent sees exactly three
-tools and reaches everything else through them:
+tools up front), connect it to `mcp-router` alone. The router's surface follows
+the capabilities of the servers behind it: `get_installed_mcps` is always
+present, the tools pair appears when at least one scope-visible server offers
+tools, and the resources pair appears when one offers resources. Reach
+everything through those tools:
 
 1. `get_installed_mcps(regex_filter?)` — the registered servers. The filter
    matches server names and descriptions; `check=true` also reports reachability
@@ -62,12 +65,22 @@ tools and reaches everything else through them:
    `unreachable_servers` note, and a broad search over the 50-result cap is
    refused with a "narrow the filter" message.
 3. `run_mcp_tool(mcp_name, mcp_tool, arguments?)` — invoke one of them.
+4. `search_resources(regex_filter?, mcp_name?)` — find resources and resource
+   templates in one call, matching server and resource names, descriptions and
+   URIs. Results are compact `{mcp_name, name, uri, description, mimeType}`
+   summaries; a resource template also carries `template: true`. Cross-server
+   results have the shape `{resources: [...], unreachable_servers: [...]}` and
+   are capped like tool searches.
+5. `read_resource(mcp_name, uri)` — read one resource, or an expanded resource
+   template, and return its contents as embedded resources.
 
 v2.0 collapses discovery into `search_tools` so the common path is
 `search_tools` → `run_mcp_tool` instead of one round trip per step. A filter
 that matches a server name or description narrows the scan to that server and
-returns its catalog; use a tool keyword to search all servers. The three-tool
-surface is unchanged.
+returns its catalog; use a tool keyword to search all servers. The surface is
+dynamic, not a fixed count: a connection whose servers offer no tools omits the
+tools pair, and one whose servers offer no resources omits the resource pair.
+Prompt tools arrive in a later release.
 
 Adding and removing servers is done from the CLI, never through the agent, so
 those operations never occupy an agent's context.
@@ -130,23 +143,44 @@ sends a literal `${VAR}` to a child.
 
 ### Scopes
 
-A scope is a named, per-connection allow-list of servers and, optionally, tools.
-Select one with `MCP_ROUTER_SCOPE=<name>` (or `mcp-router serve --scope <name>`).
-With no scope selected, every registered server is reachable.
+A scope is a named, per-connection allow-list of servers and, optionally, their
+tools, resources and prompts. Select one with `MCP_ROUTER_SCOPE=<name>` (or
+`mcp-router serve --scope <name>`). With no scope selected, every registered
+server is reachable.
 
 ```yaml
+version: 2
 scopes:
   support:
-    tickets: null                  # all ticket tools
+    tickets: null                  # all ticket tools (legacy shorthand)
   readonly:
-    filesystem: ["read_file", "list_directory"]
+    filesystem:
+      tools: ["read_file", "list_directory"]
+      resources: ["file:///home/simo/notes.md", "file:///home/simo/docs/"]
 ```
 
-- `null` — the server is visible with all its tools.
-- a list — only those tools are listed and callable.
-- an empty list — the server is visible with no tools.
+- `null` or `{tools: null}` — the server is visible with all its tools.
+- a bare list — only those tools are listed and callable (legacy shorthand).
+- a mapping — per-category allow-lists under `tools`, `resources` and
+  `prompts` (prompt allow-lists are validated now; prompt tools ship later). A
+  category omitted from the mapping allows none.
+- a list within a category — only those names (tools, prompts) or URIs
+  (resources) are visible and usable.
+- an empty list — the server is visible with none of that category.
 - a server absent from the scope — hidden and not callable.
 - `mcp-router scopes` prints the matrix.
+
+Resource entries match by URI. A literal entry matches only that exact URI; a
+trailing `/` (such as `tickets://`) matches that prefix; and a template (such as
+`docs://{path}`) matches concrete URIs in that shape, where a bare `{var}`
+covers one path segment, `{+var}` spans segments and `{/var}` adds
+slash-prefixed segments. Unsupported RFC 6570 operators are rejected when the
+config is validated. See
+[ADR 0003](docs/adr/0003-surface-tools-resources-prompts.md) for the rationale.
+
+A document with resource or prompt allow-lists is written as `version: 2`. A
+`version: 1` document keeps working unchanged, and its bare lists are read as
+tools-only, so gaining the resource category never widens an existing scope.
 
 A scope may only name registered servers, and serving with an undefined scope
 name fails at startup.
@@ -343,12 +377,18 @@ Point your MCP client at the stdio server:
 
 ## Behaviour
 
-- Sessions are opened lazily on first use and cached for the router's lifetime.
+- The router connects to every scope-visible server at startup to learn whether
+  it offers tools, resources or prompts, then caches those sessions for its
+  lifetime. A server that fails to connect is reported as unreachable and is
+  still attempted lazily when used.
 - Default timeout is 30s for connecting and for each tool call.
 - Failures are returned as `isError` results, never raised.
 - `search_tools` returns compact summaries by default and the child's
   `inputSchema` with `full=true`; `run_mcp_tool` returns the child's result
   verbatim, so the agent sees what it would have seen directly.
+- `search_resources` returns compact resource and resource-template summaries and
+  is capped at 50 results; `read_resource` returns the child's contents as
+  embedded resources, preserving text or blob content and MIME type.
 
 See `CONTEXT.md` for the glossary and `docs/adr/` for the decisions behind this
 shape.

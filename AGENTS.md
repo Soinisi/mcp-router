@@ -23,9 +23,13 @@ tools for all other ("registered") servers behind it. See `CONTEXT.md`
 ## Architecture (non-obvious)
 
 - `src/mcp_router/`: `config.py` (schema/load/resolve) → `registry.py` (add/remove) → `sessions.py` (connect+cache) → `server.py` (MCP surface) → `cli.py`.
-- The MCP tool surface is **exactly three** read/run tools. `add`/`remove` are
-  **CLI-only on purpose** — exposing them would cost every agent context. Do not
-  add mutation tools (ADR 0001).
+- The MCP tool surface is **dynamic** and read/run only: `get_installed_mcps`
+  always, the tools pair (`search_tools`/`run_mcp_tool`) only when a
+  scope-visible server offers tools, and the resources pair
+  (`search_resources`/`read_resource`) only when one offers resources. A startup
+  probe reads each server's advertised capabilities and caches the union for the
+  session (ADR 0003). `add`/`remove` are **CLI-only on purpose** — exposing them
+  would cost every agent context. Do not add mutation tools (ADR 0001).
 - The schema in `config.py` is **ours** (`extra="forbid"`). Never add parsing for
   VS Code/Claude/opencode formats; translating is the caller's job.
 - Uses the **low-level** `mcp.server.lowlevel.Server`, not FastMCP, so child
@@ -34,8 +38,10 @@ tools for all other ("registered") servers behind it. See `CONTEXT.md`
 - `skills/mcp-router/SKILL.md` is the user-facing install/register skill; it is
   symlinked into the user skills directory, not loaded by the router.
 - `scopes` in the config are selected by `MCP_ROUTER_SCOPE` / `serve --scope`;
-  the three tool handlers in `server.py` filter discovery and reject
-  out-of-scope calls (ADR 0002).
+  the tool and resource handlers in `server.py` filter discovery and reject
+  out-of-scope calls (ADR 0002, ADR 0003). Schema v2 scope entries allow-list
+  tools, resources and prompts per server; v1 bare lists are still read as
+  tools-only.
 
 ## Gotchas
 

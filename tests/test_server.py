@@ -73,6 +73,8 @@ async def test_end_to_end_via_stdio(tmp_path):
                 "get_installed_mcps",
                 "search_tools",
                 "run_mcp_tool",
+                "search_resources",
+                "read_resource",
             }
 
             installed = await session.call_tool("get_installed_mcps", {})
@@ -93,7 +95,20 @@ async def test_end_to_end_via_stdio(tmp_path):
 
 async def test_end_to_end_error_is_returned_not_raised(tmp_path):
     cfg = tmp_path / "config.yaml"
-    cfg.write_text(yaml.safe_dump({"version": 1, "mcp_servers": {}}))
+    cfg.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "mcp_servers": {
+                    "child": {
+                        "type": "local",
+                        "command": sys.executable,
+                        "args": [str(CHILD)],
+                    }
+                },
+            }
+        )
+    )
     env = {**os.environ, "MCP_ROUTER_CONFIG": str(cfg)}
     params = StdioServerParameters(
         command=sys.executable, args=["-m", "mcp_router.server"], env=env
