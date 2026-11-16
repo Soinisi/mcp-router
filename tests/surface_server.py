@@ -5,7 +5,9 @@ FastMCP always registers resource handlers, so every FastMCP server advertises
 that genuinely advertises only a subset, which the low-level ``Server`` gives
 us.
 
-Usage: ``python surface_server.py {tools|resources|both|none}``.
+Usage: ``python surface_server.py CATEGORIES`` where CATEGORIES is a
+comma-separated subset of ``tools``, ``resources`` and ``prompts``; the
+shortcuts ``both`` (tools + resources) and ``none`` are also accepted.
 """
 
 from __future__ import annotations
@@ -18,11 +20,17 @@ from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.stdio import stdio_server
 
 MODE = sys.argv[1] if len(sys.argv) > 1 else "tools"
+if MODE == "both":
+    CATEGORIES = {"tools", "resources"}
+elif MODE == "none":
+    CATEGORIES = set()
+else:
+    CATEGORIES = set(MODE.split(","))
 
 server = Server("surface")
 
 
-if MODE in {"tools", "both"}:
+if "tools" in CATEGORIES:
 
     @server.list_tools()
     async def list_tools() -> list[types.Tool]:
@@ -39,7 +47,7 @@ if MODE in {"tools", "both"}:
         return [types.TextContent(type="text", text="pong")]
 
 
-if MODE in {"resources", "both"}:
+if "resources" in CATEGORIES:
 
     @server.list_resources()
     async def list_resources() -> list[types.Resource]:
@@ -72,6 +80,60 @@ if MODE in {"resources", "both"}:
     @server.read_resource()
     async def read_resource(uri) -> list[ReadResourceContents]:
         return [ReadResourceContents(content=f"contents of {uri}", mime_type="text/plain")]
+
+
+if "prompts" in CATEGORIES:
+
+    @server.list_prompts()
+    async def list_prompts() -> list[types.Prompt]:
+        return [
+            types.Prompt(
+                name="summarize",
+                description="Summarize a text.",
+                arguments=[
+                    types.PromptArgument(
+                        name="text",
+                        description="The text to summarize.",
+                        required=True,
+                    )
+                ],
+            ),
+            types.Prompt(
+                name="review",
+                description="Review the current change.",
+            ),
+        ]
+
+    @server.get_prompt()
+    async def get_prompt(
+        name: str, arguments: dict[str, str] | None = None
+    ) -> types.GetPromptResult:
+        if name == "summarize":
+            text = (arguments or {}).get("text", "")
+            return types.GetPromptResult(
+                description="Summarize a text.",
+                messages=[
+                    types.PromptMessage(
+                        role="user",
+                        content=types.TextContent(
+                            type="text", text=f"Summarize: {text}"
+                        ),
+                    )
+                ],
+            )
+        if name == "review":
+            return types.GetPromptResult(
+                description="Review the current change.",
+                messages=[
+                    types.PromptMessage(
+                        role="user",
+                        content=types.TextContent(
+                            type="text", text="Review the current change."
+                        ),
+                    )
+                ],
+            )
+        raise ValueError(f"Unknown prompt {name!r}")
 
 
 async def main() -> None:

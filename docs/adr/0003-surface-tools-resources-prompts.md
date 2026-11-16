@@ -3,10 +3,8 @@
 An MCP server can offer a client three kinds of capability: tools (invocable
 actions), resources (data read by URI) and prompts (reusable message
 templates). ADR 0001 established a single façade with runtime discovery instead
-of registering every child tool up front. This ADR extends that shape from
-tools to resources. Prompts are the declared third category, but their tools
-ship separately; the config and the probe already accept them so that ship
-needs no schema change.
+of registering every child tool up front. This ADR extends that shape across all
+three categories: tools, resources and prompts.
 
 This supersedes ADR 0001's "exactly three tools" count: the surface is now
 dynamic, and three is only the legacy tool-only shape.
@@ -18,7 +16,7 @@ polymorphic pair:
 
 - tools: `search_tools` / `run_mcp_tool`
 - resources: `search_resources` / `read_resource`
-- prompts (later): `search_prompts` / `get_prompt`
+- prompts: `search_prompts` / `get_prompt`
 
 A single polymorphic pair was rejected. The arguments and results differ per
 category — a tool call takes JSON arguments and returns the child's result, a
@@ -42,9 +40,9 @@ session and builds its own tool list from it:
 - `get_installed_mcps` is always exposed, because browsing the registered
   servers is the entry point to everything else.
 - The tool pair appears only when at least one scope-visible server offers
-  tools; the resource pair only when one offers resources.
-- Prompt tools are not built yet. The `prompts` category is probed and accepted
-  in scopes so the surface can be extended without another schema migration.
+  tools; the resource pair only when one offers resources, and the prompt pair
+  only when one offers prompts. Categories are gated independently: a server
+  that offers prompts but no resources still makes the prompt pair visible.
 
 Why eager instead of lazy? An MCP client asks for the tool list once at
 initialize and does not re-ask. A static five-tool surface would make every
@@ -126,6 +124,7 @@ Three MCP features are deliberately not proxied:
   prefix.
 - The startup probe is bounded by the connect timeout and parallel across
   servers, but a slow server still delays the router's first response.
-- The `prompts` scope key is parsed, validated and probed while no prompt tools
-  exist. That is intentional forward compatibility: a config written now does
-  not need editing when prompt support lands.
+- The surface is complete across all three categories. Prompt discovery matches
+  names and descriptions, `get_prompt` forwards the caller's arguments and
+  returns the child's result verbatim, and the scope's `prompts` allow-list
+  gates both discovery and rendering.

@@ -101,6 +101,8 @@ async def test_child_resources_are_searchable_and_readable(tmp_path: Path):
             "run_mcp_tool",
             "search_resources",
             "read_resource",
+            "search_prompts",
+            "get_prompt",
         }
 
         entries = await _search(session, {"mcp_name": "child"})
