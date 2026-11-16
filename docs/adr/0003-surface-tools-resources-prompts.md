@@ -45,10 +45,10 @@ session and builds its own tool list from it:
   that offers prompts but no resources still makes the prompt pair visible.
 
 Why eager instead of lazy? An MCP client asks for the tool list once at
-initialize and does not re-ask. A static five-tool surface would make every
-agent carry resource tools even when no registered server exposes a resource,
-which is exactly the context cost this design exists to avoid. The probe costs
-one connection per server at startup, and the existing session cache reuses
+initialize and does not re-ask. A static seven-tool surface would make every
+agent carry resource and prompt tools even when no registered server exposes
+them, which is exactly the context cost this design exists to avoid. The probe
+costs one connection per server at startup, and the existing session cache reuses
 those connections for real calls.
 
 A server that fails to connect during the probe contributes no capabilities and

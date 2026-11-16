@@ -13,9 +13,9 @@ step.
 - **One MCP server instead of many.** Register `mcp-router` once and list every
   other MCP server in its config; it starts local servers over stdio and reaches
   remote ones over HTTP or SSE.
-- **Dynamic discovery.** The agent searches for tools and resources at runtime
-  rather than having every server's catalog installed up front, so it only pays
-  for what it looks up.
+- **Dynamic discovery.** The agent searches for tools, resources and prompts at
+  runtime rather than having every server's catalog installed up front, so it
+  only pays for what it looks up.
 - **Lower context and token cost.** The agent sees a few router tool definitions,
   not every server's full catalog. In the [benchmark](#context-savings-benchmark)
   sample run, registration-only input context falls 72.5% at 10 servers and an

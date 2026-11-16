@@ -106,5 +106,5 @@ For opencode, use an `mcp` entry with `type: "local"` and
 - `add` and `remove` are CLI-only; the MCP surface is read/run only.
 - The MCP surface is dynamic: `get_installed_mcps` is always exposed, the
   `search_tools`/`run_mcp_tool` pair appears when a visible server offers tools,
-  and `search_resources`/`read_resource` appears when one offers resources.
-  Prompt tools are not available yet.
+  `search_resources`/`read_resource` when one offers resources, and
+  `search_prompts`/`get_prompt` when one offers prompts.
