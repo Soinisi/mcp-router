@@ -83,10 +83,11 @@ URIs in that shape. Template expressions support the RFC 6570 forms that can
 be matched without ambiguity: a bare `{var}` matches one path segment,
 `{+var}` matches across segments, and `{/var}` matches slash-prefixed
 segments. Unsupported operator-prefixed placeholders (`{?var}`, `{&var}`,
-`{#var}`, `{.var}`, `{;var}` and any other RFC 6570 operator) are rejected at
-config validation, fail-closed: compiling them as a single-segment wildcard
-would authorize siblings of the literal prefix. Resources have no stable name
-to match by, so the URI is the only honest key.
+`{#var}`, `{.var}`, `{;var}` and any other RFC 6570 operator) and malformed
+expressions such as `{}` or `{!var}` are rejected at config validation,
+fail-closed: compiling them as a single-segment wildcard would authorize
+siblings of the literal prefix. Resources have no stable name to match by, so
+the URI is the only honest key.
 
 Version rule, kept consistent across `add`, `remove` and `dump_config`: reads
 accept version 1 and 2 and either entry shape; a write emits version 2 as soon

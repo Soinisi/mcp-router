@@ -190,6 +190,25 @@ def test_scope_v2_rejects_unsupported_resource_template_operator(operator):
         )
 
 
+@pytest.mark.parametrize("placeholder", ["{=x}", "{}", "{!x}"])
+def test_scope_v2_rejects_malformed_resource_template_placeholder(placeholder):
+    # A placeholder that is not a bare variable name or a supported operator is
+    # rejected rather than compiled into a wildcard that could authorize
+    # sibling URIs.
+    with pytest.raises(ConfigError, match="malformed template expression"):
+        parse_config(
+            {
+                "version": 2,
+                "mcp_servers": {"t": {"type": "local", "command": "true"}},
+                "scopes": {
+                    "x": {
+                        "t": {"resources": [f"surface://{placeholder}"]}
+                    }
+                },
+            }
+        )
+
+
 @pytest.mark.parametrize(
     "pattern",
     ["surface://{name}", "surface://{+path}", "surface://item{/path}"],

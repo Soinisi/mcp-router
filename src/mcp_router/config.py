@@ -67,6 +67,7 @@ _CATEGORY_LABELS = {
 _RESOURCE_TEMPLATE_PART = re.compile(r"\{([^}]*)\}")
 _RFC6570_OPERATORS = frozenset("+#./;?&")
 _SUPPORTED_RESOURCE_OPERATORS = frozenset("+/")
+_RESOURCE_VARNAME_START = re.compile(r"[A-Za-z0-9_]")
 
 
 def _reject_unsupported_resource_operator(
@@ -75,16 +76,23 @@ def _reject_unsupported_resource_operator(
     """Fail closed on resource templates that would need a wildcard matcher."""
     for placeholder in _RESOURCE_TEMPLATE_PART.findall(pattern):
         operator = placeholder[:1]
-        if (
-            operator in _RFC6570_OPERATORS
-            and operator not in _SUPPORTED_RESOURCE_OPERATORS
-        ):
+        if operator in _SUPPORTED_RESOURCE_OPERATORS:
+            continue
+        if operator and _RESOURCE_VARNAME_START.fullmatch(operator):
+            continue
+        if operator in _RFC6570_OPERATORS:
             raise ValueError(
                 f"scope {scope_name!r}.{server_name!r} resource pattern "
                 f"{pattern!r} uses unsupported RFC 6570 operator "
                 f"'{{{operator}}}'; only {{var}}, {{+var}} and {{/var}} are "
                 f"supported"
             )
+        raise ValueError(
+            f"scope {scope_name!r}.{server_name!r} resource pattern "
+            f"{pattern!r} has a malformed template expression "
+            f"'{{{placeholder}}}'; only {{var}}, {{+var}} and {{/var}} are "
+            f"supported"
+        )
 
 
 class ScopeEntry(BaseModel):
