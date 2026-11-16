@@ -61,6 +61,31 @@ _CATEGORY_LABELS = {
     "prompts": "prompt name",
 }
 
+# RFC 6570 operator characters. Only {var}, {+var} and {/var} can be matched
+# without ambiguity, so the rest are rejected at validation rather than being
+# compiled to a wildcard that could authorize sibling URIs.
+_RESOURCE_TEMPLATE_PART = re.compile(r"\{([^}]*)\}")
+_RFC6570_OPERATORS = frozenset("+#./;?&")
+_SUPPORTED_RESOURCE_OPERATORS = frozenset("+/")
+
+
+def _reject_unsupported_resource_operator(
+    scope_name: str, server_name: str, pattern: str
+) -> None:
+    """Fail closed on resource templates that would need a wildcard matcher."""
+    for placeholder in _RESOURCE_TEMPLATE_PART.findall(pattern):
+        operator = placeholder[:1]
+        if (
+            operator in _RFC6570_OPERATORS
+            and operator not in _SUPPORTED_RESOURCE_OPERATORS
+        ):
+            raise ValueError(
+                f"scope {scope_name!r}.{server_name!r} resource pattern "
+                f"{pattern!r} uses unsupported RFC 6570 operator "
+                f"'{{{operator}}}'; only {{var}}, {{+var}} and {{/var}} are "
+                f"supported"
+            )
+
 
 class ScopeEntry(BaseModel):
     """Per-server allow-lists for one scope, split by MCP surface category.
@@ -75,6 +100,8 @@ class ScopeEntry(BaseModel):
     Tool and prompt entries are names. Resource entries are exact URIs by
     default; a trailing ``/`` makes the entry a prefix (``tickets://``), and a
     template such as ``docs://{path}`` matches concrete URIs in that shape.
+    Templates support ``{var}``, ``{+var}`` and ``{/var}``; other RFC 6570
+    operators are rejected at validation.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -126,6 +153,11 @@ class RouterConfig(BaseModel):
                             f"scope {scope_name!r}.{server_name!r} has an empty "
                             f"{_CATEGORY_LABELS[category]}"
                         )
+                    if category == "resources":
+                        for pattern in cleaned:
+                            _reject_unsupported_resource_operator(
+                                scope_name, server_name, pattern
+                            )
                     setattr(entry, category, list(dict.fromkeys(cleaned)))
         return self
 

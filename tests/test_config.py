@@ -171,6 +171,40 @@ def test_scope_v2_rejects_empty_resource_pattern():
         )
 
 
+@pytest.mark.parametrize("operator", ["?", "&", "#", ".", ";"])
+def test_scope_v2_rejects_unsupported_resource_template_operator(operator):
+    # RFC 6570 reserves these operators for query, fragment, label and matrix
+    # expansions; we cannot match them without authorizing sibling URIs, so
+    # validation rejects them instead of compiling them as a wildcard.
+    with pytest.raises(ConfigError, match="unsupported RFC 6570 operator"):
+        parse_config(
+            {
+                "version": 2,
+                "mcp_servers": {"t": {"type": "local", "command": "true"}},
+                "scopes": {
+                    "x": {
+                        "t": {"resources": [f"surface://user{{{operator}limit}}"]}
+                    }
+                },
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    ["surface://{name}", "surface://{+path}", "surface://item{/path}"],
+)
+def test_scope_v2_accepts_supported_resource_template_forms(pattern):
+    config = parse_config(
+        {
+            "version": 2,
+            "mcp_servers": {"t": {"type": "local", "command": "true"}},
+            "scopes": {"x": {"t": {"resources": [pattern]}}},
+        }
+    )
+    assert config.resolve_scope("x")["t"].resources == [pattern]
+
+
 def test_scope_v1_still_accepts_bare_lists_and_null():
     config = parse_config(
         {

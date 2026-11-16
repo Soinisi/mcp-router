@@ -274,33 +274,6 @@ async def test_resource_template_slash_placeholder_matches_slash_segments(tmp_pa
         assert "not available" in outside.content[0].text
 
 
-async def test_resource_template_query_operator_does_not_match_siblings(tmp_path: Path):
-    # RFC 6570 `{?limit}` adds a query expansion (or nothing when undefined);
-    # it must not turn the literal prefix into a wildcard for sibling URIs.
-    config = _write_config(
-        tmp_path,
-        {"surface": _local(SURFACE, "query")},
-        scopes={"item": {"surface": {"resources": ["surface://user{?limit}"]}}},
-        version=2,
-    )
-    async with _router(config, "item") as session:
-        entries = await _search(session, {"mcp_name": "surface"})
-        assert [entry["name"] for entry in entries] == ["user"]
-
-        for uri in ("surface://user", "surface://user?limit=5"):
-            allowed = await session.call_tool(
-                "read_resource", {"mcp_name": "surface", "uri": uri}
-            )
-            assert allowed.isError is False, uri
-
-        for uri in ("surface://user_secret", "surface://userX"):
-            denied = await session.call_tool(
-                "read_resource", {"mcp_name": "surface", "uri": uri}
-            )
-            assert denied.isError is True, uri
-            assert "not available" in denied.content[0].text
-
-
 async def test_resource_scope_exact_entry_matches_only_itself(tmp_path: Path):
     config = _write_config(
         tmp_path,

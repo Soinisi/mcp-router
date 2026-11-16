@@ -322,22 +322,16 @@ _TEMPLATE_PART = re.compile(r"\{([^}]*)\}")
 
 _TEMPLATE_OPERATORS = {
     "+": r".*",  # reserved expansion: spans segments
-    "#": r"(?:#[^/]*)?",  # fragment expansion
-    ".": r"(?:\.[^/]*)?",  # label expansion
     "/": r"(?:/[^/]*)*",  # path-segment expansion
-    ";": r"(?:;[^/]*)?",  # path-style parameters
-    "?": r"(?:\?[^/]*)?",  # query expansion
-    "&": r"(?:&[^/]*)?",  # query continuation
 }
 
 
 def _template_matcher(placeholder: str) -> str:
     """Regex for one URI-template expression, per RFC 6570 expansion.
 
-    A bare ``{var}`` expands to a single path segment. Operator-prefixed
-    expressions expand in their own syntax: ``{+var}`` may span segments,
-    ``{/var}`` adds slash-prefixed segments, and ``{?var}``, ``{&var}``,
-    ``{#var}``, ``{.var}`` and ``{;var}`` expand within one segment only.
+    A bare ``{var}`` expands to a single path segment, ``{+var}`` may span
+    segments, and ``{/var}`` adds slash-prefixed segments. Other RFC 6570
+    operators are rejected by config validation (fail-closed).
     """
     operator = placeholder[:1]
     if operator in _TEMPLATE_OPERATORS:
@@ -376,7 +370,8 @@ def _resource_allowed(allowed: list[str] | None, *uris: str) -> bool:
         return True
     if any(uri in allowed for uri in uris):
         # A scope entry is always visible as itself, including when it is a
-        # template whose own spelling (e.g. ``{?limit}``) is not a concrete URI.
+        # template whose own spelling (e.g. ``docs://{path}``) is not a
+        # concrete URI.
         return True
     patterns = [_resource_pattern(pattern) for pattern in allowed]
     return any(pattern.match(uri) for pattern in patterns for uri in uris)
