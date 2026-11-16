@@ -13,9 +13,9 @@ step.
 - **One MCP server instead of many.** Register `mcp-router` once and list every
   other MCP server in its config; it starts local servers over stdio and reaches
   remote ones over HTTP or SSE.
-- **Dynamic discovery.** The agent searches for tools and resources at runtime
-  rather than having every server's catalog installed up front, so it only pays
-  for what it looks up.
+- **Dynamic discovery.** The agent searches for tools, resources and prompts at
+  runtime rather than having every server's catalog installed up front, so it
+  only pays for what it looks up.
 - **Lower context and token cost.** The agent sees a few router tool definitions,
   not every server's full catalog. In the [benchmark](#context-savings-benchmark)
   sample run, registration-only input context falls 72.5% at 10 servers and an
@@ -50,8 +50,8 @@ Instead of connecting an agent to every MCP server (and paying for all their
 tools up front), connect it to `mcp-router` alone. The router's surface follows
 the capabilities of the servers behind it: `get_installed_mcps` is always
 present, the tools pair appears when at least one scope-visible server offers
-tools, and the resources pair appears when one offers resources. Reach
-everything through those tools:
+tools, the resources pair appears when one offers resources, and the prompts
+pair appears when one offers prompts. Reach everything through those tools:
 
 1. `get_installed_mcps(regex_filter?)` — the registered servers. The filter
    matches server names and descriptions; `check=true` also reports reachability
@@ -73,14 +73,21 @@ everything through those tools:
    are capped like tool searches.
 5. `read_resource(mcp_name, uri)` — read one resource, or an expanded resource
    template, and return its contents as embedded resources.
+6. `search_prompts(regex_filter?, mcp_name?)` — find reusable prompt templates
+   in one call, matching prompt names and descriptions. Results are compact
+   `{mcp_name, name, description}` summaries; cross-server results have the
+   shape `{prompts: [...], unreachable_servers: [...]}`.
+7. `get_prompt(mcp_name, name, arguments?)` — render one prompt template,
+   forwarding its arguments, and return the server's prompt result (description
+   and messages) verbatim.
 
 v2.0 collapses discovery into `search_tools` so the common path is
 `search_tools` → `run_mcp_tool` instead of one round trip per step. A filter
 that matches a server name or description narrows the scan to that server and
 returns its catalog; use a tool keyword to search all servers. The surface is
 dynamic, not a fixed count: a connection whose servers offer no tools omits the
-tools pair, and one whose servers offer no resources omits the resource pair.
-Prompt tools arrive in a later release.
+tools pair, one whose servers offer no resources omits the resource pair, and
+one whose servers offer no prompts omits the prompt pair.
 
 Adding and removing servers is done from the CLI, never through the agent, so
 those operations never occupy an agent's context.
@@ -162,8 +169,7 @@ scopes:
 - `null` or `{tools: null}` — the server is visible with all its tools.
 - a bare list — only those tools are listed and callable (legacy shorthand).
 - a mapping — per-category allow-lists under `tools`, `resources` and
-  `prompts` (prompt allow-lists are validated now; prompt tools ship later). A
-  category omitted from the mapping allows none.
+  `prompts`. A category omitted from the mapping allows none.
 - a list within a category — only those names (tools, prompts) or URIs
   (resources) are visible and usable.
 - an empty list — the server is visible with none of that category.
@@ -389,6 +395,9 @@ Point your MCP client at the stdio server:
 - `search_resources` returns compact resource and resource-template summaries and
   is capped at 50 results; `read_resource` returns the child's contents as
   embedded resources, preserving text or blob content and MIME type.
+- `search_prompts` returns compact prompt summaries, capped at 50 results, and
+  honors the scope's prompt allow-list; `get_prompt` forwards the prompt's
+  arguments and returns the child's result verbatim as JSON.
 
 See `CONTEXT.md` for the glossary and `docs/adr/` for the decisions behind this
 shape.

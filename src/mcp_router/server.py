@@ -1,4 +1,4 @@
-"""The router's MCP surface: discovery and proxy tools over tools and resources.
+"""The router's MCP surface: discovery and proxy tools over tools, resources and prompts.
 
 The surface is dynamic: a category's tools are exposed only when at least one
 registered server advertises that capability, detected by an eager probe at
@@ -27,8 +27,8 @@ from .sessions import DEFAULT_TIMEOUT, ServerSession, SessionManager
 #: A broad search must not dump an unbounded catalog into the agent's context.
 MAX_SEARCH_RESULTS = 50
 
-#: Categories of the server->client surface the router fronts. ``prompts`` is
-#: probed and scope-filtered now, but its tools arrive in a later ship.
+#: Categories of the server->client surface the router fronts. Each is probed
+#: at startup and gated independently.
 CAPABILITY_CATEGORIES = ("tools", "resources", "prompts")
 
 #: Words ignored when a whitespace-separated search phrase is retried as an
@@ -42,7 +42,8 @@ _INSTRUCTIONS = (
     "This is an MCP router. You are connected to one server that fronts many "
     "others. The tools available here follow what the registered servers "
     "offer: tool discovery/run appears when any server offers tools, resource "
-    "discovery/read when any server offers resources. Discover at runtime:\n"
+    "discovery/read when any server offers resources, prompt discovery/render "
+    "when any server offers prompts. Discover at runtime:\n"
     "  1. search_tools(regex_filter?, mcp_name?, full?) -> tools matching your "
     "filter. Pass a tool name or action keyword as regex_filter; pass mcp_name "
     "when you know the server. With neither it lists the servers (browse). "
@@ -51,6 +52,10 @@ _INSTRUCTIONS = (
     "  3. search_resources(regex_filter?, mcp_name?) -> resources and resource "
     "templates matching your filter.\n"
     "  4. read_resource(mcp_name, uri) -> read one resource.\n"
+    "  5. search_prompts(regex_filter?, mcp_name?) -> reusable prompt "
+    "templates matching your filter.\n"
+    "  6. get_prompt(mcp_name, name, arguments?) -> render one prompt "
+    "template.\n"
     "get_installed_mcps lists server names, descriptions and reachability; use "
     "it only when you need that list or a reachability check."
 )
@@ -220,6 +225,68 @@ _READ_RESOURCE = types.Tool(
 )
 
 
+_SEARCH_PROMPTS = types.Tool(
+    name="search_prompts",
+    description=(
+        "Search the reusable prompt templates exposed by the registered servers "
+        "that the active scope allows. Pass regex_filter to match prompt names "
+        "and descriptions. With mcp_name, search that one server; without it, "
+        "search every scope-visible server and tag each result with its "
+        "mcp_name. Cross-server results have the shape {prompts: [...], "
+        "unreachable_servers: [...]}. Results are compact {mcp_name, name, "
+        "description} summaries. Use get_prompt to render one."
+    ),
+    inputSchema={
+        "type": "object",
+        "properties": {
+            "regex_filter": {
+                "type": "string",
+                "description": (
+                    "Case-insensitive regex matched against prompt names and "
+                    "descriptions."
+                ),
+            },
+            "mcp_name": {
+                "type": "string",
+                "description": (
+                    "A server name from get_installed_mcps. Omit to search all "
+                    "scope-visible servers."
+                ),
+            },
+        },
+        "required": [],
+    },
+)
+
+_GET_PROMPT = types.Tool(
+    name="get_prompt",
+    description=(
+        "Render one prompt from a registered server, if the active scope allows "
+        "it. Pass mcp_name and name from search_prompts, and arguments matching "
+        "the prompt's declared arguments. Returns the server's prompt result "
+        "(its description and messages) verbatim as JSON."
+    ),
+    inputSchema={
+        "type": "object",
+        "properties": {
+            "mcp_name": {
+                "type": "string",
+                "description": "A server name from get_installed_mcps or search_prompts.",
+            },
+            "name": {
+                "type": "string",
+                "description": "A prompt name from search_prompts.",
+            },
+            "arguments": {
+                "type": "object",
+                "description": "Arguments for the prompt, matching its declared arguments.",
+            },
+        },
+        "required": ["mcp_name", "name"],
+    },
+)
+
+
 def _build_tools(capabilities: dict[str, bool]) -> list[types.Tool]:
     """The router's tool list for the capabilities its servers advertise."""
     tools = [_GET_INSTALLED_MCPS]
@@ -227,8 +294,8 @@ def _build_tools(capabilities: dict[str, bool]) -> list[types.Tool]:
         tools.extend([_SEARCH_TOOLS, _RUN_MCP_TOOL])
     if capabilities.get("resources"):
         tools.extend([_SEARCH_RESOURCES, _READ_RESOURCE])
-    # Prompt tools arrive in a later ship; the ``prompts`` scope key is already
-    # parsed and probed so the surface can be added without a schema change.
+    if capabilities.get("prompts"):
+        tools.extend([_SEARCH_PROMPTS, _GET_PROMPT])
     return tools
 
 _manager: SessionManager | None = None
@@ -296,6 +363,15 @@ def _scope_resources(mcp_name: str) -> list[str] | None:
     if entry is None:
         return None
     return entry.resources
+
+
+def _scope_prompts(mcp_name: str) -> list[str] | None:
+    if _scope is None:
+        return None
+    entry = _scope.get(mcp_name)
+    if entry is None:
+        return None
+    return entry.prompts
 
 
 def _offers(mcp_name: str, category: str) -> bool:
@@ -382,6 +458,15 @@ def _require_resource_in_scope(mcp_name: str, uri: str) -> None:
         raise ConfigError(
             f"Resource {uri!r} is not available on server {mcp_name!r} in scope "
             f"{_active_scope_label()!r}."
+        )
+
+
+def _require_prompt_in_scope(mcp_name: str, prompt_name: str) -> None:
+    allowed = _scope_prompts(mcp_name)
+    if allowed is not None and prompt_name not in allowed:
+        raise ConfigError(
+            f"Prompt {prompt_name!r} is not available on server {mcp_name!r} in "
+            f"scope {_active_scope_label()!r}."
         )
 
 
@@ -587,6 +672,10 @@ def build_server() -> Server:
                 return await _search_resources(_manager, arguments)
             if name == "read_resource":
                 return await _read_resource(_manager, arguments)
+            if name == "search_prompts":
+                return await _search_prompts(_manager, arguments)
+            if name == "get_prompt":
+                return await _get_prompt(_manager, arguments)
             return _error(f"Unknown tool {name!r}.")
         except (ConfigError, ValueError, TimeoutError) as exc:
             return _error(str(exc))
@@ -933,6 +1022,137 @@ async def _read_resource(
             for content in result.contents
         ]
     )
+
+
+def _prompt_entry(
+    mcp_name: str, name: str, description: str | None
+) -> dict[str, Any]:
+    entry: dict[str, Any] = {
+        "mcp_name": mcp_name,
+        "name": name,
+        "description": description,
+    }
+    return {key: value for key, value in entry.items() if value is not None}
+
+
+async def _prompt_entries(
+    session: ServerSession, mcp_name: str
+) -> list[dict[str, Any]]:
+    """Compact, scope-filtered summaries of one server's prompts."""
+    prompts = (await session.call(lambda s: s.list_prompts())).prompts
+    allowed = _scope_prompts(mcp_name)
+    if allowed is not None:
+        allowed_set = set(allowed)
+        prompts = [prompt for prompt in prompts if prompt.name in allowed_set]
+    return [
+        _prompt_entry(mcp_name, prompt.name, prompt.description)
+        for prompt in prompts
+    ]
+
+
+def _no_prompts_message(raw_filter: str | None, mcp_name: str | None = None) -> str:
+    where = f" on server {mcp_name!r}" if mcp_name else ""
+    if raw_filter is None:
+        return (
+            f"No prompts are available{where}. The active scope may hide them, "
+            "or the server may expose none."
+        )
+    return (
+        f"No prompts matched regex_filter {raw_filter!r}{where}. Try one "
+        "keyword (a prompt name or its purpose), or pass mcp_name to search one "
+        "server."
+    )
+
+
+def _too_many_prompts_message(count: int, raw_filter: str | None) -> str:
+    return (
+        f"Too many matches ({count} prompts) for regex_filter {raw_filter!r}; "
+        f"the limit is {MAX_SEARCH_RESULTS}. Narrow the filter (for example, "
+        "add a prompt name) and try again."
+    )
+
+
+async def _search_prompts(
+    manager: SessionManager, arguments: dict[str, Any]
+) -> types.CallToolResult:
+    mcp_name = arguments.get("mcp_name")
+    raw_filter = arguments.get("regex_filter")
+    pattern = _compile_filter(raw_filter)
+
+    if mcp_name:
+        _require_server_in_scope(mcp_name)
+        session = await _connect_offering(manager, mcp_name, "prompts")
+        if session is None:
+            return _error(f"Server {mcp_name!r} does not offer prompts.")
+        entries = await _prompt_entries(session, mcp_name)
+        if pattern is not None:
+            entries = [
+                entry
+                for entry in entries
+                if _matches(pattern, entry.get("name"), entry.get("description"))
+            ]
+        if not entries:
+            return _error(_no_prompts_message(raw_filter, mcp_name))
+        if len(entries) > MAX_SEARCH_RESULTS:
+            return _error(_too_many_prompts_message(len(entries), raw_filter))
+        return _text(json.dumps(entries, separators=(",", ":")))
+
+    entries = []
+    unreachable: list[dict[str, str]] = []
+    for summary in _visible_server_summaries(manager):
+        try:
+            session = await _connect_offering(manager, summary["name"], "prompts")
+            if session is None:
+                continue
+            found = await _prompt_entries(session, summary["name"])
+        except Exception as exc:  # noqa: BLE001 - one bad server must not fail a search
+            unreachable.append(
+                {
+                    "mcp_name": summary["name"],
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
+            continue
+        if pattern is not None:
+            found = [
+                entry
+                for entry in found
+                if _matches(pattern, entry.get("name"), entry.get("description"))
+            ]
+        entries.extend(found)
+
+    if pattern is not None and not entries and not unreachable:
+        return _error(_no_prompts_message(raw_filter))
+    if len(entries) > MAX_SEARCH_RESULTS:
+        return _error(_too_many_prompts_message(len(entries), raw_filter))
+    return _text(
+        json.dumps(
+            {"prompts": entries, "unreachable_servers": unreachable},
+            separators=(",", ":"),
+        )
+    )
+
+
+async def _get_prompt(
+    manager: SessionManager, arguments: dict[str, Any]
+) -> types.CallToolResult:
+    mcp_name = arguments.get("mcp_name")
+    prompt_name = arguments.get("name")
+    if not mcp_name or not prompt_name:
+        return _error("mcp_name and name are required.")
+    _require_server_in_scope(mcp_name)
+    _require_prompt_in_scope(mcp_name, prompt_name)
+    prompt_args = arguments.get("arguments")
+    if prompt_args is not None and not isinstance(prompt_args, dict):
+        return _error("arguments must be an object.")
+    session = await _connect_offering(manager, mcp_name, "prompts")
+    if session is None:
+        return _error(f"Server {mcp_name!r} does not offer prompts.")
+    result = await session.call(
+        lambda s: s.get_prompt(prompt_name, arguments=prompt_args)
+    )
+    payload = result.model_dump(by_alias=True, exclude_none=True, mode="json")
+    return _text(json.dumps(payload, separators=(",", ":")))
 
 
 async def run_server(timeout: float = DEFAULT_TIMEOUT, scope: str | None = None) -> None:

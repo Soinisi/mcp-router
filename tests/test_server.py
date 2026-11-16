@@ -75,6 +75,8 @@ async def test_end_to_end_via_stdio(tmp_path):
                 "run_mcp_tool",
                 "search_resources",
                 "read_resource",
+                "search_prompts",
+                "get_prompt",
             }
 
             installed = await session.call_tool("get_installed_mcps", {})
