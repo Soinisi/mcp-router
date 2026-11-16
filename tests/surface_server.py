@@ -74,6 +74,35 @@ if MODE in {"resources", "both"}:
         return [ReadResourceContents(content=f"contents of {uri}", mime_type="text/plain")]
 
 
+if MODE == "query":
+
+    @server.list_resources()
+    async def list_resources() -> list[types.Resource]:
+        return [
+            types.Resource(
+                uri="surface://user_secret",
+                name="user-secret",
+                description="A sibling document sharing the user URI prefix.",
+                mimeType="text/plain",
+            )
+        ]
+
+    @server.list_resource_templates()
+    async def list_resource_templates() -> list[types.ResourceTemplate]:
+        return [
+            types.ResourceTemplate(
+                uriTemplate="surface://user{?limit}",
+                name="user",
+                description="One user, optionally limited by a query parameter.",
+                mimeType="text/plain",
+            )
+        ]
+
+    @server.read_resource()
+    async def read_resource(uri) -> list[ReadResourceContents]:
+        return [ReadResourceContents(content=f"contents of {uri}", mime_type="text/plain")]
+
+
 async def main() -> None:
     async with stdio_server() as (read, write):
         await server.run(read, write, server.create_initialization_options())
