@@ -481,7 +481,10 @@ def load_config(
         for scope_name, scope in data.get("scopes", {}).items():
             merged["scopes"].setdefault(scope_name, {}).update(scope)
 
-    active_scope = resolve_saved_scope(global_data, repo_data, merged["scopes"])
+    selection_repo = None if mode == MODE_GLOBAL else repo_data
+    active_scope = resolve_saved_scope(
+        global_data, selection_repo, merged["scopes"]
+    )
     # Only carry the selection keys in the in-memory document when they mean
     # something, so a plain v1/v2 document keeps its declared version.
     if mode != MODE_GLOBAL or active_scope is not None:

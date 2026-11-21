@@ -7,7 +7,7 @@ import copy
 import pytest
 import yaml
 
-from mcp_router.config import ConfigError, atomic_write_text
+from mcp_router.config import ConfigError, atomic_write_text, load_config
 from mcp_router.scope_edit import ScopeEditor
 
 
@@ -359,6 +359,86 @@ def test_duplicate_scope_copies_entries(tmp_path):
     editor.save(write_selection=False)
     raw = _read(global_cfg)
     assert raw["scopes"]["copy"] == copy.deepcopy(raw["scopes"]["default"])
+
+
+def test_inherited_allow_lists_survive_a_v1_repo_tool_override(tmp_path):
+    global_cfg = tmp_path / "config.yaml"
+    repo_cfg = tmp_path / "mcp-router.yaml"
+    _write(
+        global_cfg,
+        {
+            "version": 2,
+            "mcp_servers": {"tickets": {"type": "local", "command": "t"}},
+            "scopes": {
+                "default": {
+                    "tickets": {
+                        "tools": None,
+                        "resources": ["tickets://"],
+                        "prompts": ["summarise"],
+                    }
+                }
+            },
+        },
+    )
+    _write(
+        repo_cfg,
+        {
+            "version": 1,
+            "mcp_servers": {"tickets": {"type": "local", "command": "t"}},
+        },
+    )
+
+    editor = ScopeEditor.load([global_cfg, repo_cfg])
+    assert editor.mode == "local-repo"
+    tickets = {row.name: row for row in editor.rows()}["tickets"]
+    assert tickets.state == "inherited"
+    editor.set_server_entry(
+        "default",
+        "tickets",
+        editor.make_target_entry(["list_tickets"], tickets.entry),
+    )
+    editor.save(write_selection=False)
+
+    repo = _read(repo_cfg)
+    assert repo["version"] == 2
+    entry = repo["scopes"]["default"]["tickets"]
+    assert entry["tools"] == ["list_tickets"]
+    assert entry["resources"] == ["tickets://"]
+    assert entry["prompts"] == ["summarise"]
+
+    loaded = load_config([global_cfg, repo_cfg], environ={})
+    resolved = loaded.config.resolve_scope("default")["tickets"]
+    assert resolved.resources == ["tickets://"]
+    assert resolved.prompts == ["summarise"]
+
+
+def test_global_mode_ignores_the_repo_active_scope_declaration(tmp_path):
+    global_cfg = tmp_path / "config.yaml"
+    repo_cfg = tmp_path / "mcp-router.yaml"
+    _write(
+        global_cfg,
+        {
+            "version": 3,
+            "mode": "global",
+            "mcp_servers": {"g": {"type": "local", "command": "g"}},
+            "scopes": {
+                "default": {"g": None},
+                "repo-only": {"g": None},
+            },
+        },
+    )
+    _write(
+        repo_cfg,
+        {
+            "version": 3,
+            "active_scope": "repo-only",
+            "scopes": {"repo-only": {"g": None}},
+        },
+    )
+
+    editor = ScopeEditor.load([global_cfg, repo_cfg])
+    assert editor.mode == "global"
+    assert editor.active_scope == "default"
 
 
 def test_scope_only_edit_keeps_v2_and_v1_versions(tmp_path):

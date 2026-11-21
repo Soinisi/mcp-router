@@ -171,6 +171,63 @@ def test_global_mode_ignores_repo_definitions(tmp_path):
     assert set(loaded.config.resolve_scope("default")) == {"g"}
 
 
+def test_global_mode_ignores_the_repo_active_scope(tmp_path):
+    global_cfg = tmp_path / "config.yaml"
+    repo_cfg = tmp_path / "mcp-router.yaml"
+    _write(
+        global_cfg,
+        {
+            "version": 3,
+            "mode": "global",
+            "mcp_servers": {"g": _server("g")},
+            "scopes": {"default": {"g": None}},
+        },
+    )
+    _write(
+        repo_cfg,
+        {
+            "version": 3,
+            "active_scope": "repo-only",
+            "scopes": {"repo-only": {"g": None}},
+        },
+    )
+
+    loaded = load_config([global_cfg, repo_cfg], environ={})
+    assert loaded.mode == "global"
+    assert loaded.active_scope == "default"
+    assert set(loaded.config.resolve_scope(loaded.active_scope)) == {"g"}
+
+
+def test_global_mode_ignores_a_repo_active_scope_name_global_also_defines(
+    tmp_path,
+):
+    global_cfg = tmp_path / "config.yaml"
+    repo_cfg = tmp_path / "mcp-router.yaml"
+    _write(
+        global_cfg,
+        {
+            "version": 3,
+            "mode": "global",
+            "mcp_servers": {"g": _server("g")},
+            "scopes": {
+                "default": {"g": None},
+                "repo-only": {"g": None},
+            },
+        },
+    )
+    _write(
+        repo_cfg,
+        {
+            "version": 3,
+            "active_scope": "repo-only",
+            "scopes": {"repo-only": {"g": None}},
+        },
+    )
+
+    loaded = load_config([global_cfg, repo_cfg], environ={})
+    assert loaded.active_scope == "default"
+
+
 def test_local_repo_inherits_and_overrides_per_server(tmp_path):
     global_cfg = tmp_path / "config.yaml"
     repo_cfg = tmp_path / "mcp-router.yaml"

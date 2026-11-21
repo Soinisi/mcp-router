@@ -177,7 +177,9 @@ class ScopeTui(App[None]):
     def __init__(self, editor: ScopeEditor | None = None) -> None:
         super().__init__()
         self.editor = editor or ScopeEditor.load()
-        self.dirty = False
+        self._ticks_dirty = False
+        self._saved_mode = self.editor.mode
+        self._saved_active_scope = self.editor.active_scope
         self._suppress = False
         self._expanded: set[str] = set()
         self._available_tools: dict[str, list[str]] = {}
@@ -185,6 +187,18 @@ class ScopeTui(App[None]):
         self._manager: SessionManager | None = None
         self._status_message = ""
         self._warned_router = False
+
+    @property
+    def dirty(self) -> bool:
+        return (
+            self._ticks_dirty
+            or self.editor.mode != self._saved_mode
+            or self.editor.active_scope != self._saved_active_scope
+        )
+
+    @dirty.setter
+    def dirty(self, value: bool) -> None:
+        self._ticks_dirty = bool(value)
 
     # -- composition -----------------------------------------------------
 
@@ -194,22 +208,29 @@ class ScopeTui(App[None]):
             with Horizontal(id="selection"):
                 yield Label("Mode: ")
                 with RadioSet(id="mode"):
-                    yield RadioButton("global", id="mode-global")
-                    yield RadioButton("local-repo", id="mode-local")
+                    yield RadioButton(
+                        "global",
+                        id="mode-global",
+                        value=self.editor.mode == MODE_GLOBAL,
+                    )
+                    yield RadioButton(
+                        "local-repo",
+                        id="mode-local",
+                        value=self.editor.mode == MODE_LOCAL_REPO,
+                    )
                 yield Label("  Edit scope: ")
                 yield Select(
                     self._edit_scope_options(),
                     id="edit-scope",
                     allow_blank=False,
+                    value=self._edit_scope_value(),
                 )
                 yield Label("  Active scope: ")
                 yield Select(
-                    [
-                        ("(unrestricted)", _UNRESTRICTED),
-                        *[(name, name) for name in self.editor.scope_names()],
-                    ],
+                    self._active_scope_options(),
                     id="active-scope",
                     allow_blank=False,
+                    value=self._active_scope_value(),
                 )
             with Horizontal(id="actions"):
                 yield Button("Save", id="save", variant="primary")
@@ -238,6 +259,26 @@ class ScopeTui(App[None]):
             return [("(no scope yet — press n)", _NO_SCOPE)]
         return [(name, name) for name in names]
 
+    def _edit_scope_value(self) -> str:
+        scopes = self.editor.scope_names()
+        if self.editor.edited_scope in scopes:
+            return self.editor.edited_scope
+        if scopes:
+            return scopes[0]
+        return _NO_SCOPE
+
+    def _active_scope_options(self) -> list[tuple[str, str]]:
+        return [
+            ("(unrestricted)", _UNRESTRICTED),
+            *[(name, name) for name in self.editor.scope_names()],
+        ]
+
+    def _active_scope_value(self) -> str:
+        scopes = self.editor.scope_names()
+        if self.editor.active_scope in scopes:
+            return self.editor.active_scope
+        return _UNRESTRICTED
+
     def _sync_selection_widgets(self) -> None:
         self._suppress = True
         try:
@@ -250,29 +291,15 @@ class ScopeTui(App[None]):
             scopes = self.editor.scope_names()
             edit = self.query_one("#edit-scope", Select)
             edit.set_options(self._edit_scope_options())
-            if self.editor.edited_scope in scopes:
-                edit.value = self.editor.edited_scope
-            elif scopes:
-                edit.value = scopes[0]
-            else:
-                edit.value = _NO_SCOPE
+            edit.value = self._edit_scope_value()
             if (
                 self.editor.active_scope is not None
                 and self.editor.active_scope not in scopes
             ):
                 self.editor.active_scope = None
             active = self.query_one("#active-scope", Select)
-            active.set_options(
-                [
-                    ("(unrestricted)", _UNRESTRICTED),
-                    *[(name, name) for name in scopes],
-                ]
-            )
-            active.value = (
-                self.editor.active_scope
-                if self.editor.active_scope in scopes
-                else _UNRESTRICTED
-            )
+            active.set_options(self._active_scope_options())
+            active.value = self._active_scope_value()
         finally:
             self._suppress = False
 
@@ -284,12 +311,24 @@ class ScopeTui(App[None]):
         def decided(confirmed: bool | None) -> None:
             if confirmed:
                 self.editor.restore_scope(self.editor.edited_scope)
+                self.editor.mode = self._saved_mode
+                self.editor.active_scope = self._saved_active_scope
+                scopes = self.editor.scope_names()
+                if self.editor.edited_scope not in scopes:
+                    self.editor.edited_scope = (
+                        self.editor.active_scope
+                        if self.editor.active_scope in scopes
+                        else scopes[0]
+                        if scopes
+                        else DEFAULT_SCOPE
+                    )
                 self.dirty = False
+                self._sync_selection_widgets()
                 then()
 
         self.push_screen(
             ConfirmScreen(
-                "Discard unsaved tick changes?",
+                "Discard unsaved changes?",
                 yes="Discard",
                 no="Keep editing",
             ),
@@ -359,9 +398,10 @@ class ScopeTui(App[None]):
         if self._suppress or event.value is Select.BLANK:
             return
         value = str(event.value)
-        self.editor.set_active_scope(
-            None if value == _UNRESTRICTED else value
-        )
+        new_scope = None if value == _UNRESTRICTED else value
+        if new_scope == self.editor.active_scope:
+            return
+        self.editor.set_active_scope(new_scope)
         self._update_status()
 
     # -- buttons ---------------------------------------------------------
@@ -585,6 +625,8 @@ class ScopeTui(App[None]):
         else:
             self._status_message = "saved (nothing changed)"
         self._sync_selection_widgets()
+        self._saved_mode = self.editor.mode
+        self._saved_active_scope = self.editor.active_scope
         self._rebuild_tree()
         self._update_status()
 
@@ -667,18 +709,7 @@ class ScopeTui(App[None]):
         )
 
     def action_quit(self) -> None:
-        if not self.dirty:
-            self.exit()
-            return
-
-        def decided(confirmed: bool | None) -> None:
-            if confirmed:
-                self.exit()
-
-        self.push_screen(
-            ConfirmScreen("Discard unsaved tick changes and quit?"),
-            decided,
-        )
+        self._confirm_discard(self.exit)
 
     # -- tools enumeration and status -----------------------------------
 

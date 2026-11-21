@@ -86,6 +86,13 @@ def _categorical_document(doc: dict[str, Any]) -> bool:
     )
 
 
+def _entry_carries_categories(entry: Any) -> bool:
+    return isinstance(entry, dict) and any(
+        category in entry and entry[category] != []
+        for category in ("resources", "prompts")
+    )
+
+
 def make_entry(
     tools: list[str] | None,
     base: Any,
@@ -169,12 +176,20 @@ class ScopeEditor:
             repo_exists=repo_exists,
         )
         editor.mode = resolve_mode(global_doc, repo_doc if repo_exists else None)
+        selection_repo = (
+            repo_doc
+            if repo_exists and editor.mode != MODE_GLOBAL
+            else None
+        )
         effective_scopes = _mapping(global_doc.get("scopes"))
-        if repo_exists:
-            effective_scopes = {**effective_scopes, **_mapping(repo_doc.get("scopes"))}
+        if selection_repo is not None:
+            effective_scopes = {
+                **effective_scopes,
+                **_mapping(repo_doc.get("scopes")),
+            }
         editor.active_scope = resolve_saved_scope(
             global_doc,
-            repo_doc if repo_exists else None,
+            selection_repo,
             effective_scopes,
         )
         scopes = editor.scope_names()
@@ -399,7 +414,10 @@ class ScopeEditor:
         return make_entry(
             tools,
             base,
-            categorical=_categorical_document(self.target_doc()),
+            categorical=(
+                _categorical_document(self.target_doc())
+                or _entry_carries_categories(base)
+            ),
         )
 
     # -- durable selection ----------------------------------------------

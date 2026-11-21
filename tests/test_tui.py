@@ -8,11 +8,11 @@ import sys
 from pathlib import Path
 
 import yaml
-from textual.widgets import Static, Tree
+from textual.widgets import RadioButton, Select, Static, Tree
 
 from mcp_router.config import write_raw_config
 from mcp_router.scope_edit import ScopeEditor
-from mcp_router.tui import ScopeTui
+from mcp_router.tui import ConfirmScreen, ScopeTui
 
 CHILD = Path(__file__).with_name("child_server.py")
 
@@ -84,6 +84,52 @@ async def test_tui_space_ticks_the_selected_server(tmp_path, monkeypatch):
         assert app.dirty is True
         rows = {row.name: row for row in app.editor.rows()}
         assert rows["alpha"].ticked is False
+
+
+async def test_tui_active_scope_change_prompts_before_quitting(
+    tmp_path, monkeypatch
+):
+    config = tmp_path / "config.yaml"
+    raw = _config()
+    raw["scopes"]["work"] = {"alpha": None}
+    write_raw_config(config, raw)
+    monkeypatch.setenv("MCP_ROUTER_CONFIG", str(config))
+    monkeypatch.chdir(tmp_path)
+
+    app = ScopeTui(ScopeEditor.load([config, tmp_path / "mcp-router.yaml"]))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.dirty is False
+
+        app.query_one("#active-scope", Select).value = "work"
+        await pilot.pause()
+        assert app.editor.active_scope == "work"
+        assert app.dirty is True
+
+        app.action_quit()
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmScreen)
+        await pilot.click("#confirm-yes")
+
+    assert app.editor.active_scope == "default"
+    assert app.dirty is False
+
+
+async def test_tui_mode_change_counts_as_unsaved(tmp_path, monkeypatch):
+    config = tmp_path / "config.yaml"
+    write_raw_config(config, _config())
+    monkeypatch.setenv("MCP_ROUTER_CONFIG", str(config))
+    monkeypatch.chdir(tmp_path)
+
+    app = ScopeTui(ScopeEditor.load([config, tmp_path / "mcp-router.yaml"]))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.dirty is False
+
+        app.query_one("#mode-local", RadioButton).value = True
+        await pilot.pause()
+        assert app.editor.mode == "local-repo"
+        assert app.dirty is True
 
 
 async def test_tui_save_writes_the_tick_list(tmp_path, monkeypatch):
