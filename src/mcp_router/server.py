@@ -11,21 +11,33 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import re
+import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, AsyncIterator
 
 import mcp.types as types
-from mcp.server.lowlevel import Server
+from mcp.server.lowlevel import NotificationOptions, Server
 from mcp.server.stdio import stdio_server
 
-from .config import ConfigError, ScopeEntry, load_config
+from .config import (
+    ConfigError,
+    ScopeEntry,
+    load_config,
+    resolve_launch_scope,
+)
 from .registry import server_summaries
 from .sessions import DEFAULT_TIMEOUT, ServerSession, SessionManager
 
 #: A broad search must not dump an unbounded catalog into the agent's context.
 MAX_SEARCH_RESULTS = 50
+
+#: Config live-reload: poll the *paths* roughly once a second and coalesce a
+#: burst of saves into one reload. Polling the path (not an inode watch) keeps
+#: working when an editor saves by rename.
+WATCH_INTERVAL = 1.0
+WATCH_DEBOUNCE = 0.25
 
 #: Categories of the server->client surface the router fronts. Each is probed
 #: at startup and gated independently.
@@ -300,7 +312,10 @@ def _build_tools(capabilities: dict[str, bool]) -> list[types.Tool]:
 
 _manager: SessionManager | None = None
 _timeout: float = DEFAULT_TIMEOUT
+#: The launch-time pin (``serve --scope``); environment pinning is read by
+#: :func:`resolve_launch_scope` so the saved selection stays authoritative.
 _scope_name: str | None = None
+_active_scope_name: str | None = None
 _scope: dict[str, ScopeEntry] | None = None
 _capabilities: dict[str, bool] = {category: False for category in CAPABILITY_CATEGORIES}
 #: Per-server advertised categories, used to skip or explain a category a
@@ -309,6 +324,13 @@ _capabilities: dict[str, bool] = {category: False for category in CAPABILITY_CAT
 _server_capabilities: dict[str, set[str]] = {}
 _tools: list[types.Tool] = []
 _probe_errors: dict[str, str] = {}
+#: Paths whose mtime/size we poll.
+_watch_paths: list[Path] = []
+#: The live client session, captured from the first request so a reload can
+#: send ``notifications/tools/list_changed``. The lifespan itself has no
+#: client session yet.
+_notification_session: Any | None = None
+_reload_lock: asyncio.Lock | None = None
 
 
 def _text(content: str) -> types.CallToolResult:
@@ -336,7 +358,7 @@ def _matches(pattern: re.Pattern[str], *values: str | None) -> bool:
 
 
 def _active_scope_label() -> str:
-    return _scope_name or os.environ.get("MCP_ROUTER_SCOPE") or "<unknown>"
+    return _active_scope_name or "<unrestricted>"
 
 
 def _require_server_in_scope(mcp_name: str) -> None:
@@ -557,17 +579,28 @@ def _offered_categories(capabilities: Any) -> set[str]:
     }
 
 
-async def _probe_capabilities(manager: SessionManager) -> None:
-    """Connect to each scope-visible server and cache the advertised surface.
+async def _probe_capabilities(
+    manager: SessionManager, names: list[str] | None = None
+) -> None:
+    """Connect to scope-visible servers and cache the advertised surface.
 
-    A server that cannot connect is recorded in ``_probe_errors`` and simply
-    contributes no capabilities; the router must still start when one
+    With ``names`` the probe is incremental: only those servers are visited and
+    the other cache entries survive, which is what a reload needs when a new
+    scope exposes a server that was not visible before. A server that cannot
+    connect is recorded in ``_probe_errors`` and simply contributes no
+    capabilities; the router must still start (and keep running) when one
     registered server is down.
     """
     global _capabilities, _server_capabilities, _probe_errors
-    _capabilities = {category: False for category in CAPABILITY_CATEGORIES}
-    _server_capabilities = {}
-    _probe_errors = {}
+
+    summaries = _visible_server_summaries(manager)
+    visible = [summary["name"] for summary in summaries]
+    if names is None:
+        _server_capabilities = {}
+        _probe_errors = {}
+        to_probe = visible
+    else:
+        to_probe = [name for name in names if name in visible]
 
     async def probe(mcp_name: str) -> types.ServerCapabilities | None:
         try:
@@ -577,18 +610,20 @@ async def _probe_capabilities(manager: SessionManager) -> None:
             return None
         return session.capabilities
 
-    summaries = _visible_server_summaries(manager)
-    names = [summary["name"] for summary in summaries]
-    results = await asyncio.gather(*(probe(name) for name in names))
-    for mcp_name, capabilities in zip(names, results):
+    results = await asyncio.gather(*(probe(name) for name in to_probe))
+    for mcp_name, capabilities in zip(to_probe, results):
         if capabilities is None:
             # Unreachable at probe time: leave it out of the cache so discovery
             # still retries it and can report it as unreachable.
             continue
-        offered = _offered_categories(capabilities)
-        _server_capabilities[mcp_name] = offered
-        for category in offered:
-            _capabilities[category] = True
+        _server_capabilities[mcp_name] = _offered_categories(capabilities)
+
+    _capabilities = {
+        category: any(
+            category in _server_capabilities.get(name, set()) for name in visible
+        )
+        for category in CAPABILITY_CATEGORIES
+    }
 
 
 def _record_connection(mcp_name: str, session: ServerSession) -> None:
@@ -618,18 +653,147 @@ async def _connect_offering(
     return session if _offers(mcp_name, category) else None
 
 
+def _stat_signature(path: Path) -> tuple[int, int] | None:
+    """The (mtime_ns, size) poll signature for one path, or None if absent."""
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return stat.st_mtime_ns, stat.st_size
+
+
+def _snapshot(paths: list[Path]) -> dict[Path, tuple[int, int] | None]:
+    return {path: _stat_signature(path) for path in paths}
+
+
+def _capture_notification_session(server: Server) -> None:
+    """Remember the client session from the first request (the lifespan has none)."""
+    global _notification_session
+    if _notification_session is not None:
+        return
+    try:
+        _notification_session = server.request_context.session
+    except LookupError:
+        return
+
+
+async def _notify_tools_changed() -> None:
+    """Send ``notifications/tools/list_changed`` after a successful reload."""
+    global _notification_session
+    session = _notification_session
+    if session is None:
+        return
+    try:
+        await session.send_tool_list_changed()
+    except Exception as exc:  # noqa: BLE001 - a failed notification must not matter
+        print(
+            f"mcp-router: could not send tools/list_changed: "
+            f"{type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        _notification_session = None
+
+
+async def _reload_config(server: Server) -> bool:
+    """Re-read the config and swap the live surface; keep the last good one.
+
+    Returns True when the new document was adopted. An invalid document is
+    reported on stderr and changes nothing: the running surface never widens to
+    an unrestricted fallback.
+    """
+    global _manager, _active_scope_name, _scope, _tools
+    global _server_capabilities, _probe_errors
+
+    assert _manager is not None
+    try:
+        loaded = load_config()
+        if not loaded.sources:
+            raise ConfigError(
+                "No router config found; keeping the last good configuration."
+            )
+        active = resolve_launch_scope(loaded, _scope_name)
+        scope = loaded.config.resolve_scope(active)
+    except ConfigError as exc:
+        print(
+            "mcp-router: config reload failed; keeping the last good "
+            f"configuration: {exc}",
+            file=sys.stderr,
+        )
+        return False
+
+    invalidated = await _manager.reconfigure(loaded.config, loaded.environ)
+    for name in set(invalidated) | (
+        set(_server_capabilities) - set(loaded.config.mcp_servers)
+    ):
+        _server_capabilities.pop(name, None)
+        _probe_errors.pop(name, None)
+
+    _active_scope_name = active
+    _scope = scope
+    visible = (
+        set(scope) if scope is not None else set(loaded.config.mcp_servers)
+    )
+    newly_visible = [
+        name
+        for name in sorted(visible)
+        if name not in _server_capabilities and name not in _probe_errors
+    ]
+    # Probes never raise for a down server; the running surface stays up.
+    await _probe_capabilities(_manager, names=newly_visible)
+    _tools = _build_tools(_capabilities)
+    await _notify_tools_changed()
+    return True
+
+
+async def _watch_config(server: Server) -> None:
+    """Poll the config paths, debounce a burst of saves, then reload once."""
+    signature = _snapshot(_watch_paths)
+    while True:
+        await asyncio.sleep(WATCH_INTERVAL)
+        current = _snapshot(_watch_paths)
+        if current == signature:
+            continue
+        while True:
+            await asyncio.sleep(WATCH_DEBOUNCE)
+            again = _snapshot(_watch_paths)
+            if again == current:
+                break
+            current = again
+        signature = current
+        assert _reload_lock is not None
+        async with _reload_lock:
+            try:
+                await _reload_config(server)
+            except Exception as exc:  # noqa: BLE001 - the watcher must survive
+                print(
+                    "mcp-router: config watcher error; keeping the last good "
+                    f"configuration: {type(exc).__name__}: {exc}",
+                    file=sys.stderr,
+                )
+
+
 @asynccontextmanager
 async def _lifespan(server: Server) -> AsyncIterator[dict[str, Any]]:
-    global _manager, _scope, _tools, _capabilities, _server_capabilities
+    global _manager, _active_scope_name, _scope, _tools
+    global _capabilities, _server_capabilities, _probe_errors
+    global _watch_paths, _reload_lock, _notification_session
+
     loaded = load_config()
     if not loaded.sources:
         raise ConfigError(
             "No router config found. Create one with `mcp-router add` or at "
             "~/.config/mcp-router/config.yaml."
         )
-    active_scope = _scope_name if _scope_name is not None else os.environ.get("MCP_ROUTER_SCOPE")
-    _scope = loaded.config.resolve_scope(active_scope)
+    _active_scope_name = resolve_launch_scope(loaded, _scope_name)
+    _scope = loaded.config.resolve_scope(_active_scope_name)
+    _watch_paths = [
+        path
+        for path in (loaded.global_path, loaded.repo_path)
+        if path is not None
+    ]
+    _reload_lock = asyncio.Lock()
     _manager = SessionManager(loaded.config, environ=loaded.environ, timeout=_timeout)
+    watcher = asyncio.create_task(_watch_config(server), name="mcp-router:config-watch")
     try:
         await _probe_capabilities(_manager)
         _tools = _build_tools(_capabilities)
@@ -640,12 +804,19 @@ async def _lifespan(server: Server) -> AsyncIterator[dict[str, Any]]:
             "capabilities": _capabilities,
         }
     finally:
+        watcher.cancel()
+        await asyncio.gather(watcher, return_exceptions=True)
         await _manager.aclose()
         _manager = None
+        _active_scope_name = None
         _scope = None
         _tools = []
         _capabilities = {category: False for category in CAPABILITY_CATEGORIES}
         _server_capabilities = {}
+        _probe_errors = {}
+        _watch_paths = []
+        _reload_lock = None
+        _notification_session = None
 
 
 def build_server() -> Server:
@@ -653,10 +824,12 @@ def build_server() -> Server:
 
     @server.list_tools()
     async def list_tools() -> list[types.Tool]:
+        _capture_notification_session(server)
         return list(_tools)
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict[str, Any] | None) -> types.CallToolResult:
+        _capture_notification_session(server)
         assert _manager is not None
         arguments = arguments or {}
         if name not in {tool.name for tool in _tools}:
@@ -1161,7 +1334,13 @@ async def run_server(timeout: float = DEFAULT_TIMEOUT, scope: str | None = None)
     _scope_name = scope
     server = build_server()
     async with stdio_server() as (read, write):
-        await server.run(read, write, server.create_initialization_options())
+        await server.run(
+            read,
+            write,
+            server.create_initialization_options(
+                NotificationOptions(tools_changed=True)
+            ),
+        )
 
 
 def main() -> None:

@@ -44,6 +44,18 @@ def test_secrets_preserved_as_placeholder(user_config):
     assert "${TOKEN}" in user_config.read_text()
 
 
+def test_add_keeps_one_previous_generation(user_config):
+    add_server("a", {"type": "local", "command": "a"})
+    first = user_config.read_text(encoding="utf-8")
+    add_server("b", {"type": "local", "command": "b"})
+
+    backup = user_config.with_name(user_config.name + ".bak")
+    assert backup.read_text(encoding="utf-8") == first
+    assert "b" in yaml.safe_load(user_config.read_text(encoding="utf-8"))[
+        "mcp_servers"
+    ]
+
+
 def test_remove(user_config):
     add_server("fs", {"type": "local", "command": "a"})
     remove_server("fs")

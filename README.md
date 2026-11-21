@@ -20,8 +20,12 @@ step.
   not every server's full catalog. In the [benchmark](#context-savings-benchmark)
   sample run, registration-only input context falls 72.5% at 10 servers and an
   end-to-end session saves 55.5% of its input tokens.
-- **Per-connection scopes.** Each client or project sees only the servers and
-  tools, resources and prompts it needs, chosen by the launching environment.
+- **Durable scopes.** Each client or project sees only the servers and tools,
+  resources and prompts it needs, with global and local-repo modes and a saved
+  active selection that survives a restart.
+- **Live scope editing from a terminal.** A tick-list editor changes scopes and
+  the durable global/local-repo mode while a router is running; the running
+  server reloads the config and announces the new tool surface.
 - **CLI-only registry changes.** Adding and removing servers is a command, never
   a tool call, so it never occupies an agent's context.
 - **Works with any MCP client.** The router is a plain stdio MCP server, so
@@ -37,6 +41,8 @@ step.
 - [Configure](#configure)
   - [Secrets](#secrets)
   - [Scopes](#scopes)
+  - [Terminal UI](#terminal-ui)
+  - [Live reload](#live-reload)
 - [CLI](#cli)
 - [End-to-end tests](#end-to-end-tests)
 - [Context-savings benchmark](#context-savings-benchmark)
@@ -95,7 +101,8 @@ those operations never occupy an agent's context.
 ## Install
 
 ```sh
-uv tool install .        # provides `mcp-router` (and `mcp-router-server`)
+uv tool install .              # provides `mcp-router` (and `mcp-router-server`)
+uv tool install '.[tui]'       # also installs the optional terminal UI (Textual)
 ```
 
 ## Agent skill
@@ -150,15 +157,17 @@ sends a literal `${VAR}` to a child.
 
 ### Scopes
 
-A scope is a named, per-connection allow-list of servers and, optionally, their
-tools, resources and prompts. Select one with `MCP_ROUTER_SCOPE=<name>` (or
-`mcp-router serve --scope <name>`). With no scope selected, every registered
-server is reachable.
+A scope is a named allow-list of servers and, optionally, their tools,
+resources and prompts. The **active scope** and the **mode** are durable
+selections stored in the config files, so they survive a restart. With no
+active scope selected, every registered server is reachable.
 
 ```yaml
-version: 2
+version: 3
+mode: local-repo
+active_scope: default
 scopes:
-  support:
+  default:
     tickets: null                  # all ticket tools (legacy shorthand)
   readonly:
     filesystem:
@@ -185,18 +194,95 @@ config is validated. See
 [ADR 0003](docs/adr/0003-surface-tools-resources-prompts.md) for the rationale.
 
 A document with resource or prompt allow-lists is written as `version: 2`. A
-`version: 1` document keeps working unchanged, and its bare lists are read as
-tools-only, so gaining the resource category never widens an existing scope.
+document that carries the durable `mode` / `active_scope` keys is written as
+`version: 3`. `version: 1` and `version: 2` documents keep working unchanged,
+and their bare lists are read as tools-only, so gaining the resource category
+never widens an existing scope.
 
 A scope may only name registered servers, and serving with an undefined scope
 name fails at startup.
 
-Scopes merge across config files per server, like `mcp_servers`: a project scope
-with the same name adds servers to the user-level scope and overrides the entry
-for any server it names.
+The scope named **`default`** is special: when no `active_scope` is declared and
+no launch scope is pinned, it is the active scope. When there is no `default`
+scope either, the view is unrestricted, exactly as before.
 
-A scope is a guardrail selected by the launching client's environment, not an
-authentication boundary.
+### Modes and inheritance
+
+There are two modes:
+
+- **`global`** applies the global (`~/.config/mcp-router/config.yaml`)
+  definitions only. A repo `mcp-router.yaml` is ignored for the effective
+  configuration.
+- **`local-repo`** inherits the global definitions and overrides only the
+  servers named by the repo file, for the same scope name. A repo scope
+  therefore adds to the global scope and replaces individual server entries
+  rather than replacing the whole scope. This is the existing merge behaviour,
+  and it is the default whenever a repo-level `mcp-router.yaml` exists.
+
+The `mode` and `active_scope` keys resolve repo-first, consistent with the
+per-file merge. Switching to global clears the repo's `mode` / `active_scope`
+declaration without rewriting the repo's servers or scopes.
+
+### Launch pins
+
+The saved selection is authoritative. `MCP_ROUTER_SCOPE` (or
+`mcp-router serve --scope`) may repeat the saved active scope, or pin a scope
+when the saved view is unrestricted (which narrows it). A launch pin that names
+a different scope than the saved selection is refused with an explanatory
+error instead of silently widening the view. There is deliberately no CLI verb
+for changing the saved selection: only the terminal UI can do that, so an agent
+cannot easily widen its own view.
+
+A scope is a guardrail selected by a human, not an authentication boundary.
+
+### Terminal UI
+
+```sh
+mcp-router tui
+```
+
+The tick-list editor needs a real terminal (it refuses to run non-interactively
+and has no flags or stdin path). It has three independent selections: the
+**mode**, the **scope being edited**, and the **active scope**. Navigating to a
+scope is not activation; the active scope changes only when you choose it and
+press Save.
+
+Each registered server is a row, ticked when present in the edited scope
+because a scope is an allow-list. Expand a row to tick individual tools. In
+`local-repo` mode, rows are marked **inherited** (from the global file) or
+**overridden** (by the repo file); `r` reverts an override, removing that repo
+entry so the global one applies again. In `global` mode, rows that the repo file
+shadows in local mode are marked. New, duplicate and delete are supported;
+a scope cannot be deleted while it is active.
+
+Saves edit the raw global or repo file in place — never the merged view — and
+never touch `mcp_servers`: hiding a server or tool is a visibility change, not a
+deletion. Secrets stay in their `${VAR}` form on disk. The editor may connect to
+child servers directly to enumerate tools; a server that cannot be reached (or
+whose secret cannot be resolved) shows "cannot enumerate" and is still
+toggleable at server level. A save that hides every server asks for confirmation
+first.
+
+The status line shows the resolved repo config path and warns, best-effort, when
+no running router appears to work from that directory. That check never blocks a
+save. The message says **saved**: the file is the only channel, and nothing
+acknowledges the write back to the editor.
+
+### Live reload
+
+A running router polls its config paths (the global file and the repo file) for
+mtime and size changes about once a second, coalesces a burst of saves into one
+reload, and re-reads the files. It re-validates, recomputes the mode and active
+scope, probes only servers that are newly visible, reuses existing sessions,
+rebuilds its tool surface, and sends `notifications/tools/list_changed`. A
+server that fails to connect does not take the running surface down.
+
+An invalid config keeps the **last good** configuration and is reported on
+stderr; it never crashes the router and never falls back to an unrestricted
+view. Config writes (the CLI's `add`/`remove` and the terminal editor) are
+atomic: they write a temporary file next to the target and rename it, keeping one
+previous generation as `<name>.bak`. See
+[ADR 0004](docs/adr/0004-config-as-channel-reload.md).
 
 ## CLI
 
@@ -204,7 +290,8 @@ authentication boundary.
 mcp-router list                 # registered servers, one per line
 mcp-router tools filesystem     # the tools one server exposes
 mcp-router validate             # validate the config
-mcp-router scopes               # list scopes and their allow-lists
+mcp-router scopes               # list scopes, the mode and the active scope
+mcp-router tui                  # edit scopes and the selection (needs a TTY)
 mcp-router serve [--scope NAME] # run as an MCP server over stdio
 mcp-router add filesystem -f spec.yaml [--project] [--overwrite]
 mcp-router remove filesystem [--project]
@@ -386,7 +473,10 @@ Point your MCP client at the stdio server:
 - The router connects to every scope-visible server at startup to learn whether
   it offers tools, resources or prompts, then caches those sessions for its
   lifetime. A server that fails to connect is reported as unreachable and is
-  still attempted lazily when used.
+  still attempted lazily when used. A config save reloads the surface without
+  restarting the router (see [Live reload](#live-reload)).
+- Config writes are atomic and keep one previous generation as `<name>.bak`; a
+  reader never sees a half-written document.
 - Default timeout is 30s for connecting and for each tool call.
 - Failures are returned as `isError` results, never raised.
 - `search_tools` returns compact summaries by default and the child's

@@ -9,10 +9,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import yaml
 from pydantic import TypeAdapter, ValidationError
 
 from .config import (
+    CONFIG_VERSION,
     ConfigError,
     RouterConfig,
     Server,
@@ -21,6 +21,7 @@ from .config import (
     global_config_path,
     project_config_path,
     scope_uses_categories,
+    write_raw_config,
 )
 
 _SERVER_ADAPTER = TypeAdapter(Server)
@@ -58,17 +59,22 @@ def _load_raw(path: Path) -> dict[str, Any]:
 
 
 def _write_raw(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # A document that carries (or already declared) per-category scopes is
-    # version 2; otherwise a CLI mutation preserves the declared version.
-    if data.get("version") == 2 or scope_uses_categories(data.get("scopes")):
+    # A document that carries the durable selection keys is version 3; one with
+    # (or already declared) per-category scopes is version 2; otherwise a CLI
+    # mutation preserves the declared version.
+    if (
+        data.get("version") == CONFIG_VERSION
+        or data.get("mode") is not None
+        or data.get("active_scope") is not None
+    ):
+        data["version"] = CONFIG_VERSION
+    elif data.get("version") == 2 or scope_uses_categories(data.get("scopes")):
         data["version"] = 2
     else:
         data.setdefault("version", 1)
-    path.write_text(
-        yaml.safe_dump(data, sort_keys=True, default_flow_style=False),
-        encoding="utf-8",
-    )
+    # Writers replace the file by rename so a running router never reads a
+    # partial document. ``registry`` is the only CLI mutation path.
+    write_raw_config(path, data)
 
 
 def add_server(

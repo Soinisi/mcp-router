@@ -55,7 +55,7 @@ def test_remote_requires_url():
 
 def test_bad_version_rejected():
     with pytest.raises(ConfigError, match="version"):
-        parse_config({"version": 3, "mcp_servers": {}})
+        parse_config({"version": 4, "mcp_servers": {}})
 
 
 def test_env_expansion_at_resolve_time():

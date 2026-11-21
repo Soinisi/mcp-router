@@ -156,6 +156,52 @@ async def test_check_reports_scoped_tool_count(tmp_path: Path, scope: str, expec
         ]
 
 
+def test_launch_pin_cannot_widen_the_saved_selection(tmp_path: Path):
+    config = tmp_path / "router.yaml"
+    config.write_text(
+        yaml.safe_dump(
+            {
+                "version": 3,
+                "active_scope": "alpha-only",
+                "mcp_servers": {
+                    "alpha": {
+                        "type": "local",
+                        "command": sys.executable,
+                        "args": [str(CHILD)],
+                    },
+                    "beta": {
+                        "type": "local",
+                        "command": sys.executable,
+                        "args": [str(CHILD)],
+                    },
+                },
+                "scopes": {
+                    "alpha-only": {"alpha": None},
+                    "everything": {"alpha": None, "beta": None},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    env = {
+        **os.environ,
+        "MCP_ROUTER_CONFIG": str(config),
+        "MCP_ROUTER_SCOPE": "everything",
+    }
+    proc = subprocess.run(
+        [sys.executable, "-m", "mcp_router.server"],
+        env=env,
+        input="",
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert proc.returncode != 0
+    assert "conflicts with the saved active scope" in (
+        proc.stdout + proc.stderr
+    )
+
+
 def test_unknown_scope_fails_startup(tmp_path: Path):
     config = _write_config(tmp_path)
     env = {

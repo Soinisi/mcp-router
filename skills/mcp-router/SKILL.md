@@ -52,8 +52,12 @@ format; translate it into this one.
 ## 3. Restrict access (optional)
 
 A scope is a named allow-list of servers, and optionally of each server's
-tools, resources and prompts. Select it with `MCP_ROUTER_SCOPE=<name>` (or
-`mcp-router serve --scope <name>`).
+tools, resources and prompts. The active scope and the global/local-repo mode
+are saved in the config and changed by a human in `mcp-router tui`; there is no
+CLI verb for changing them. `MCP_ROUTER_SCOPE=<name>` (or
+`mcp-router serve --scope <name>`) is only a launch pin: it may repeat the saved
+scope or narrow an unrestricted saved view, but it cannot widen the saved
+selection.
 
 ```yaml
 version: 2
@@ -96,8 +100,9 @@ Register the router as the only MCP server:
 ```
 
 For opencode, use an `mcp` entry with `type: "local"` and
-`command: ["mcp-router", "serve"]`. To restrict the view, add
-`MCP_ROUTER_SCOPE` to the entry's environment.
+`command: ["mcp-router", "serve"]`. To narrow an unrestricted saved view, add
+`MCP_ROUTER_SCOPE` to the entry's environment; it cannot widen the saved
+selection. Changing the saved scope is a human action in `mcp-router tui`.
 
 ## Gotchas
 

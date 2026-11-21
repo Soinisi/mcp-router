@@ -61,9 +61,33 @@ def serve(
 
 
 @app.command()
+def tui() -> None:
+    """Edit scopes and the active selection in a terminal UI (needs a TTY)."""
+    # Refuse before importing the optional dependency: there is deliberately
+    # no flag or stdin path that can drive the editor non-interactively.
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        _fail(
+            "The terminal UI needs a real terminal; it cannot run "
+            "non-interactively."
+        )
+    try:
+        from .tui import run_tui
+    except ImportError:
+        _fail(
+            "The terminal UI needs the optional 'tui' extra: "
+            "install with `pip install 'mcp-router[tui]'`."
+        )
+    run_tui()
+
+
+@app.command()
 def scopes() -> None:
     """List the configured scopes and their per-category allow-lists."""
     loaded = _load_or_fail()
+    typer.echo(f"mode: {loaded.mode}")
+    typer.echo(
+        f"active scope: {loaded.active_scope or '(unrestricted)'}"
+    )
     if not loaded.config.scopes:
         typer.echo("No scopes defined.")
         return

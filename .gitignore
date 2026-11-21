@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 .env
 mcp-router.yaml
+mcp-router.yaml.bak
 .pytest_cache/
 dist/
 build/

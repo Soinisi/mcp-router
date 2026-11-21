@@ -13,6 +13,10 @@ dependencies = [
     "typer>=0.12",
 ]
 
+[project.optional-dependencies]
+# The terminal editor is optional so a normal agent install stays lean.
+tui = ["textual>=1.0"]
+
 [project.scripts]
 mcp-router = "mcp_router.cli:main"
 mcp-router-server = "mcp_router.server:main"
@@ -21,6 +25,7 @@ mcp-router-server = "mcp_router.server:main"
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
+    "textual>=1.0",
 ]
 
 [build-system]
