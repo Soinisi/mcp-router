@@ -353,6 +353,12 @@ class ScopeTui(App[None]):
         if self._suppress or event.value is Select.BLANK:
             return
         name = str(event.value)
+        # ``set_options`` resets the selection to the first option and emits a
+        # Changed message; by the time it is handled the widget has already
+        # been moved to its real value.  Such a stale message is not user
+        # navigation, so ignore it (it would otherwise re-enter sync forever).
+        if str(event.select.value) != name:
+            return
         if name == _NO_SCOPE or name == self.editor.edited_scope:
             return
 
@@ -371,6 +377,10 @@ class ScopeTui(App[None]):
         if self._suppress or event.value is Select.BLANK:
             return
         value = str(event.value)
+        # See _edit_scope_changed: skip the transient value emitted by
+        # ``set_options`` before the real value is restored.
+        if str(event.select.value) != value:
+            return
         new_scope = None if value == _UNRESTRICTED else value
         if new_scope == self.editor.active_scope:
             return

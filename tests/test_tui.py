@@ -140,6 +140,48 @@ async def test_tui_mode_change_counts_as_unsaved(tmp_path, monkeypatch):
         assert app.dirty is True
 
 
+async def test_tui_mode_switch_with_non_default_active_scope_is_one_change(
+    tmp_path, monkeypatch
+):
+    config = tmp_path / "config.yaml"
+    raw = _config()
+    raw["active_scope"] = "readonly"
+    raw["scopes"]["readonly"] = {"beta": None}
+    write_raw_config(config, raw)
+    monkeypatch.setenv("MCP_ROUTER_CONFIG", str(config))
+    monkeypatch.chdir(tmp_path)
+
+    app = ScopeTui(ScopeEditor.load([config, tmp_path / "mcp-router.yaml"]))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.editor.active_scope == "readonly"
+        assert app.dirty is False
+        assert len(app.screen_stack) == 1
+
+        app.query_one("#mode-local", RadioButton).value = True
+        for _ in range(5):
+            await pilot.pause()
+        # The click alone is one unsaved change, not a self-reproducing
+        # discard prompt; the active scope stays on the saved selection.
+        assert app.editor.mode == "local-repo"
+        assert app.editor.active_scope == "readonly"
+        assert app.dirty is True
+        assert len(app.screen_stack) == 1
+        assert not isinstance(app.screen, ConfirmScreen)
+
+        # Quitting still prompts exactly once and the discard is dismissable.
+        app.action_quit()
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmScreen)
+        await pilot.click("#confirm-yes")
+        await pilot.pause()
+        assert len(app.screen_stack) == 1
+
+    assert app.editor.mode == "global"
+    assert app.editor.active_scope == "readonly"
+    assert app.dirty is False
+
+
 async def test_tui_save_writes_the_tick_list(tmp_path, monkeypatch):
     config = tmp_path / "config.yaml"
     write_raw_config(config, _config())
