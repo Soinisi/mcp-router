@@ -41,6 +41,8 @@ step.
 - [Configure](#configure)
   - [Secrets](#secrets)
   - [Scopes](#scopes)
+  - [Modes and inheritance](#modes-and-inheritance)
+  - [Launch pins](#launch-pins)
   - [Terminal UI](#terminal-ui)
   - [Live reload](#live-reload)
 - [CLI](#cli)
@@ -119,8 +121,8 @@ ln -s "$PWD/skills/mcp-router" ~/.claude/skills/mcp-router
 
 ## Configure
 
-`~/.config/mcp-router/config.yaml` (optionally overridden per project by
-`./mcp-router.yaml`):
+`~/.config/mcp-router/config.yaml` (plus an optional per-project
+`./mcp-router.yaml`, inherited in `local-repo` mode):
 
 ```yaml
 version: 1
@@ -202,9 +204,9 @@ never widens an existing scope.
 A scope may only name registered servers, and serving with an undefined scope
 name fails at startup.
 
-The scope named **`default`** is special: when no `active_scope` is declared and
-no launch scope is pinned, it is the active scope. When there is no `default`
-scope either, the view is unrestricted, exactly as before.
+The scope named **`default`** is special: when the effective config declares no
+`active_scope`, it becomes the saved active scope. With no `default` scope
+either, the saved view is unrestricted, exactly as before.
 
 ### Modes and inheritance
 
@@ -245,8 +247,7 @@ mcp-router tui
 The tick-list editor needs a real terminal (it refuses to run non-interactively
 and has no flags or stdin path). It has three independent selections: the
 **mode**, the **scope being edited**, and the **active scope**. Navigating to a
-scope is not activation; the active scope changes only when you choose it and
-press Save.
+scope is not activation; the active scope is committed only on Save.
 
 Each registered server is a row, ticked when present in the edited scope
 because a scope is an allow-list. Expand a row to tick individual tools. In
@@ -471,12 +472,11 @@ Point your MCP client at the stdio server:
 ## Behaviour
 
 - The router connects to every scope-visible server at startup to learn whether
-  it offers tools, resources or prompts, then caches those sessions for its
-  lifetime. A server that fails to connect is reported as unreachable and is
+  it offers tools, resources or prompts, then caches those sessions across
+  reloads; a server whose definition or secret environment changed reconnects on
+  next use. A server that fails to connect is reported as unreachable and is
   still attempted lazily when used. A config save reloads the surface without
   restarting the router (see [Live reload](#live-reload)).
-- Config writes are atomic and keep one previous generation as `<name>.bak`; a
-  reader never sees a half-written document.
 - Default timeout is 30s for connecting and for each tool call.
 - Failures are returned as `isError` results, never raised.
 - `search_tools` returns compact summaries by default and the child's

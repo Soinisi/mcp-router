@@ -22,7 +22,10 @@ tools for all other ("registered") servers behind it. See `CONTEXT.md`
 
 ## Architecture (non-obvious)
 
-- `src/mcp_router/`: `config.py` (schema/load/resolve) → `registry.py` (add/remove) → `sessions.py` (connect+cache) → `server.py` (MCP surface) → `cli.py`.
+- `src/mcp_router/`: `config.py` (schema/load/resolve) → `registry.py`
+  (add/remove) → `sessions.py` (connect+cache) → `server.py` (MCP surface) →
+  `cli.py`. `scope_edit.py` + `tui.py` are the human-only terminal editor over
+  the raw config files.
 - The MCP tool surface is **dynamic** and read/run only: `get_installed_mcps`
   always, the tools pair (`search_tools`/`run_mcp_tool`) only when a
   scope-visible server offers tools, the resources pair
@@ -57,8 +60,9 @@ tools for all other ("registered") servers behind it. See `CONTEXT.md`
 - `SessionManager` sessions have task affinity: each cached server is owned by one
   background task and all calls go through its queue. Don't call `session.*`
   from other tasks; use `session.call(lambda s: s.list_tools())`.
-- Config: `~/.config/mcp-router/config.yaml` (or `$MCP_ROUTER_CONFIG`), overridden
-  per project by `./mcp-router.yaml`.
+- Config: `~/.config/mcp-router/config.yaml` (or `$MCP_ROUTER_CONFIG`), merged
+  with `./mcp-router.yaml` in `local-repo` mode (the default when the file
+  exists); `global` mode ignores the repo file.
 
 ## Tests
 

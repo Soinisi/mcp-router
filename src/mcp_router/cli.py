@@ -82,7 +82,7 @@ def tui() -> None:
 
 @app.command()
 def scopes() -> None:
-    """List the configured scopes and their per-category allow-lists."""
+    """List the configured scopes, the mode and the active scope."""
     loaded = _load_or_fail()
     typer.echo(f"mode: {loaded.mode}")
     typer.echo(

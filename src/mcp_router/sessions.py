@@ -1,11 +1,12 @@
 """Lazy connection management for registered MCP servers.
 
-Each server is connected on first use and its session is cached for the
-lifetime of the router process. Because the SDK's stdio / streamable-http
-clients are async context managers with task affinity, every cached server
-gets a dedicated background task that owns its ``AsyncExitStack`` and
-``ClientSession``. Requests are funnelled through that task via a queue, so a
-session is only ever touched from the task that created it.
+Each server is connected on first use and its session is cached until its
+definition or secret environment changes (a config reload closes a stale one).
+Because the SDK's stdio / streamable-http clients are async context managers
+with task affinity, every cached server gets a dedicated background task that
+owns its ``AsyncExitStack`` and ``ClientSession``. Requests are funnelled
+through that task via a queue, so a session is only ever touched from the task
+that created it.
 """
 
 from __future__ import annotations

@@ -139,8 +139,8 @@ MODE_GLOBAL = "global"
 MODE_LOCAL_REPO = "local-repo"
 ScopeMode = Literal["global", "local-repo"]
 
-#: The scope the terminal editor edits, and the fallback active scope when a
-#: document declares one and nothing else pins a scope.
+#: The fallback active scope when the effective config declares no
+#: ``active_scope``; the terminal editor prefers it when it exists.
 DEFAULT_SCOPE = "default"
 
 
