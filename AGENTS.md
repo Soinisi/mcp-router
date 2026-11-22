@@ -8,7 +8,7 @@ tools for all other ("registered") servers behind it. See `CONTEXT.md`
 
 - Everything runs through uv: `uv sync`, then `uv run <cmd>`.
 - Tests: `uv run pytest`. Single test: `uv run pytest tests/test_server.py::test_end_to_end_via_stdio`.
-- CLI: `uv run mcp-router {serve,list,tools,scopes,add,remove,validate}`; stdio server is `uv run mcp-router-server` (or `python -m mcp_router.server`).
+- CLI: `uv run mcp-router {serve,list,tools,scopes,tui,add,remove,validate}`; stdio server is `uv run mcp-router-server` (or `python -m mcp_router.server`).
 - No linter/formatter/typecheck is configured. Do not invent one.
 
 ## Git and shipping
@@ -22,16 +22,19 @@ tools for all other ("registered") servers behind it. See `CONTEXT.md`
 
 ## Architecture (non-obvious)
 
-- `src/mcp_router/`: `config.py` (schema/load/resolve) → `registry.py` (add/remove) → `sessions.py` (connect+cache) → `server.py` (MCP surface) → `cli.py`.
+- `src/mcp_router/`: `config.py` (schema/load/resolve) → `registry.py`
+  (add/remove) → `sessions.py` (connect+cache) → `server.py` (MCP surface) →
+  `cli.py`. `scope_edit.py` + `tui.py` are the human-only terminal editor over
+  the raw config files.
 - The MCP tool surface is **dynamic** and read/run only: `get_installed_mcps`
   always, the tools pair (`search_tools`/`run_mcp_tool`) only when a
   scope-visible server offers tools, the resources pair
   (`search_resources`/`read_resource`) only when one offers resources, and the
   prompts pair (`search_prompts`/`get_prompt`) only when one offers prompts. A
   startup probe reads each server's advertised capabilities and caches the union
-  for the session (ADR 0003). `add`/`remove` are **CLI-only on purpose** —
-  exposing them would cost every agent context. Do not add mutation tools (ADR
-  0001).
+  for the session, and a config reload refreshes it (ADR 0003, ADR 0004).
+  `add`/`remove` are **CLI-only on purpose** — exposing them would cost every
+  agent context. Do not add mutation tools (ADR 0001).
 - The schema in `config.py` is **ours** (`extra="forbid"`). Never add parsing for
   VS Code/Claude/opencode formats; translating is the caller's job.
 - Uses the **low-level** `mcp.server.lowlevel.Server`, not FastMCP, so child
@@ -39,11 +42,12 @@ tools for all other ("registered") servers behind it. See `CONTEXT.md`
   as `isError` results, never raised.
 - `skills/mcp-router/SKILL.md` is the user-facing install/register skill; it is
   symlinked into the user skills directory, not loaded by the router.
-- `scopes` in the config are selected by `MCP_ROUTER_SCOPE` / `serve --scope`;
-  the tool, resource and prompt handlers in `server.py` filter discovery and
-  reject out-of-scope calls (ADR 0002, ADR 0003). Schema v2 scope entries
-  allow-list tools, resources and prompts per server; v1 bare lists are still
-  read as tools-only.
+- The durable active scope and mode live in the config and are changed only by
+  the terminal UI; `MCP_ROUTER_SCOPE` / `serve --scope` is a launch pin that
+  cannot widen the saved selection. The tool, resource and prompt handlers in
+  `server.py` filter discovery and reject out-of-scope calls (ADR 0002, ADR
+  0003). Scope entries (v2+) allow-list tools, resources and prompts per server;
+  v3 adds `mode` / `active_scope`; v1 bare lists are still read as tools-only.
 
 ## Gotchas
 
@@ -56,8 +60,9 @@ tools for all other ("registered") servers behind it. See `CONTEXT.md`
 - `SessionManager` sessions have task affinity: each cached server is owned by one
   background task and all calls go through its queue. Don't call `session.*`
   from other tasks; use `session.call(lambda s: s.list_tools())`.
-- Config: `~/.config/mcp-router/config.yaml` (or `$MCP_ROUTER_CONFIG`), overridden
-  per project by `./mcp-router.yaml`.
+- Config: `~/.config/mcp-router/config.yaml` (or `$MCP_ROUTER_CONFIG`), merged
+  with `./mcp-router.yaml` in `local-repo` mode (the default when the file
+  exists); `global` mode ignores the repo file.
 
 ## Tests
 

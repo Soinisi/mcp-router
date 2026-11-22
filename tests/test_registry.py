@@ -44,6 +44,18 @@ def test_secrets_preserved_as_placeholder(user_config):
     assert "${TOKEN}" in user_config.read_text()
 
 
+def test_add_keeps_one_previous_generation(user_config):
+    add_server("a", {"type": "local", "command": "a"})
+    first = user_config.read_text(encoding="utf-8")
+    add_server("b", {"type": "local", "command": "b"})
+
+    backup = user_config.with_name(user_config.name + ".bak")
+    assert backup.read_text(encoding="utf-8") == first
+    assert "b" in yaml.safe_load(user_config.read_text(encoding="utf-8"))[
+        "mcp_servers"
+    ]
+
+
 def test_remove(user_config):
     add_server("fs", {"type": "local", "command": "a"})
     remove_server("fs")
@@ -80,6 +92,80 @@ def test_remove_cascades_into_scopes(user_config):
         "mixed": {"docs": ScopeEntry(tools=None, resources=[], prompts=[])},
         "docs-only": {"docs": ScopeEntry(tools=[], resources=[], prompts=[])},
     }
+
+
+def test_remove_keeps_an_active_scope_resolvable(user_config):
+    user_config.write_text(
+        yaml.safe_dump(
+            {
+                "version": 3,
+                "active_scope": "default",
+                "mcp_servers": {"fs": {"type": "local", "command": "a"}},
+                "scopes": {"default": {"fs": None}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    remove_server("fs")
+
+    loaded = load_config(environ={})
+    assert loaded.active_scope == "default"
+    assert loaded.config.resolve_scope("default") == {}
+
+
+def test_remove_keeps_the_implicit_default_scope_resolvable(user_config):
+    user_config.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "mcp_servers": {"fs": {"type": "local", "command": "a"}},
+                "scopes": {"default": {"fs": None}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    remove_server("fs")
+
+    loaded = load_config(environ={})
+    assert loaded.active_scope == "default"
+    assert loaded.config.resolve_scope("default") == {}
+
+
+def test_remove_keeps_a_sibling_declared_active_scope_resolvable(
+    tmp_path, monkeypatch, user_config
+):
+    user_config.write_text(
+        yaml.safe_dump(
+            {
+                "version": 3,
+                "mcp_servers": {"fs": {"type": "local", "command": "a"}},
+                "scopes": {"work": {"fs": None}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    (project_dir / "mcp-router.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "version": 3,
+                "active_scope": "work",
+                "mcp_servers": {},
+                "scopes": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(project_dir)
+
+    remove_server("fs")
+
+    loaded = load_config(environ={})
+    assert loaded.active_scope == "work"
+    assert loaded.config.resolve_scope("work") == {}
 
 
 def test_write_keeps_v1_when_scopes_use_the_legacy_shape(user_config):

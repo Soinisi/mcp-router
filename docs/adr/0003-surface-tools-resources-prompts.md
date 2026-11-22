@@ -87,12 +87,13 @@ fail-closed: compiling them as a single-segment wildcard would authorize
 siblings of the literal prefix. Resources have no stable name to match by, so
 the URI is the only honest key.
 
-Version rule, kept consistent across `add`, `remove` and `dump_config`: reads
-accept version 1 and 2 and either entry shape; a write emits version 2 as soon
-as the document contains (or declares) resource or prompt allow-lists, and
-otherwise preserves the declared version and the legacy shape. A mapping that
-carries only `tools` means the same as the legacy bare list, so it does not by
-itself force version 2.
+Version rule, kept consistent across `add`, `remove`, `dump_config` and the
+terminal editor: reads accept versions 1, 2 and 3 and either entry shape; a
+write emits version 2 as soon as the document contains (or declares) resource or
+prompt allow-lists, and otherwise preserves the declared version and the legacy
+shape. A mapping that carries only `tools` means the same as the legacy bare
+list, so it does not by itself force version 2. A document carrying the durable
+`mode` / `active_scope` keys is version 3 instead; see ADR 0004.
 
 ## Out of scope
 

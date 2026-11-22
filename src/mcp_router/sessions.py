@@ -1,11 +1,12 @@
 """Lazy connection management for registered MCP servers.
 
-Each server is connected on first use and its session is cached for the
-lifetime of the router process. Because the SDK's stdio / streamable-http
-clients are async context managers with task affinity, every cached server
-gets a dedicated background task that owns its ``AsyncExitStack`` and
-``ClientSession``. Requests are funnelled through that task via a queue, so a
-session is only ever touched from the task that created it.
+Each server is connected on first use and its session is cached until its
+definition or secret environment changes (a config reload closes a stale one).
+Because the SDK's stdio / streamable-http clients are async context managers
+with task affinity, every cached server gets a dedicated background task that
+owns its ``AsyncExitStack`` and ``ClientSession``. Requests are funnelled
+through that task via a queue, so a session is only ever touched from the task
+that created it.
 """
 
 from __future__ import annotations
@@ -202,7 +203,38 @@ class SessionManager:
             self._sessions[name] = session
             return session
 
+    async def reconfigure(
+        self, config: RouterConfig, environ: dict[str, str] | None = None
+    ) -> set[str]:
+        """Adopt a reloaded config, keeping sessions that are still valid.
+
+        A cached session survives when its server name is still registered and
+        its *raw* definition is unchanged (secrets stay unresolved until
+        connect time). A changed definition, a removed server, or a changed
+        secret environment closes the old session so the next call reconnects.
+        Returns the names whose cached session was invalidated.
+        """
+        new_environ = environ if environ is not None else self.environ
+        environ_changed = new_environ != self.environ
+        self.config = config
+        self.environ = new_environ
+        invalidated: set[str] = set()
+        for name in list(self._sessions):
+            cached = self._sessions[name]
+            definition_changed = (
+                name not in config.mcp_servers
+                or cached.server.model_dump()
+                != config.mcp_servers[name].model_dump()
+            )
+            if environ_changed or definition_changed:
+                self._sessions.pop(name, None)
+                self._locks.pop(name, None)
+                invalidated.add(name)
+                await cached.aclose()
+        return invalidated
+
     async def aclose(self) -> None:
         for session in list(self._sessions.values()):
             await session.aclose()
         self._sessions.clear()
+        self._locks.clear()

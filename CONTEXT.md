@@ -39,8 +39,12 @@ Resolving `${VAR}` placeholders in a spec from the environment and `.env` at con
 _Avoid_: env substitution, interpolation
 
 **Scope**:
-A named, per-connection allow-list of registered servers and optionally their tools, resources and prompts.
+A named allow-list of registered servers and optionally their tools, resources and prompts; its active selection is stored in the config.
 _Avoid_: profile, role, permission set
+
+**Mode**:
+The durable selection between `global` (the global config alone) and `local-repo` (inherit the global set and override only what the repo file names).
+_Avoid_: target, level
 
 **Config target**:
 Which config file a CLI mutation writes: the user config or the project's `./mcp-router.yaml`.

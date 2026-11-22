@@ -52,8 +52,12 @@ format; translate it into this one.
 ## 3. Restrict access (optional)
 
 A scope is a named allow-list of servers, and optionally of each server's
-tools, resources and prompts. Select it with `MCP_ROUTER_SCOPE=<name>` (or
-`mcp-router serve --scope <name>`).
+tools, resources and prompts. The active scope and the global/local-repo mode
+are saved in the config and changed by a human in `mcp-router tui`; there is no
+CLI verb for changing them. `MCP_ROUTER_SCOPE=<name>` (or
+`mcp-router serve --scope <name>`) is only a launch pin: it may repeat the saved
+scope or narrow an unrestricted saved view, but it cannot widen the saved
+selection.
 
 ```yaml
 version: 2
@@ -70,8 +74,9 @@ scopes:
 mapping = per-category `tools`/`resources`/`prompts` allow-lists (an omitted
 category means none), `[]` = none, an absent server = hidden. A resource entry
 matches an exact URI, a trailing-`/` prefix, or a `{var}`/`{+var}`/`{/var}`
-URI template. With no scope selected, everything is reachable. `mcp-router
-scopes` prints the matrix. A scope is a guardrail, not authentication.
+URI template. With no active scope and no `default` scope, everything is
+reachable. `mcp-router scopes` prints the matrix. A scope is a guardrail, not
+authentication.
 
 ## 4. Secrets
 
@@ -96,13 +101,15 @@ Register the router as the only MCP server:
 ```
 
 For opencode, use an `mcp` entry with `type: "local"` and
-`command: ["mcp-router", "serve"]`. To restrict the view, add
-`MCP_ROUTER_SCOPE` to the entry's environment.
+`command: ["mcp-router", "serve"]`. To narrow an unrestricted saved view, add
+`MCP_ROUTER_SCOPE` to the entry's environment; it cannot widen the saved
+selection. Changing the saved scope is a human action in `mcp-router tui`.
 
 ## Gotchas
 
 - Config: `~/.config/mcp-router/config.yaml`, or `$MCP_ROUTER_CONFIG`; a
-  `./mcp-router.yaml` overrides it per project.
+  `./mcp-router.yaml` adds to it per project in `local-repo` mode (the default
+  when that file exists). `global` mode ignores it.
 - `add` and `remove` are CLI-only; the MCP surface is read/run only.
 - The MCP surface is dynamic: `get_installed_mcps` is always exposed, the
   `search_tools`/`run_mcp_tool` pair appears when a visible server offers tools,
