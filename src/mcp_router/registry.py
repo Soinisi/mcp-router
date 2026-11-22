@@ -13,6 +13,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from .config import (
     CONFIG_VERSION,
+    MODE_GLOBAL,
     ConfigError,
     RouterConfig,
     Server,
@@ -20,6 +21,8 @@ from .config import (
     dump_config,
     global_config_path,
     project_config_path,
+    resolve_mode,
+    resolve_saved_scope,
     scope_uses_categories,
     write_raw_config,
 )
@@ -109,6 +112,7 @@ def remove_server(name: str, target: str = "user") -> list[str]:
         raise ConfigError(f"Server {name!r} is not registered in {path}.")
 
     sibling = resolve_target("project" if target == "user" else "user")
+    sibling_data: dict[str, Any] | None = None
     if sibling.resolve() != path.resolve() and sibling.is_file():
         sibling_data = _load_raw(sibling)
         if name not in sibling_data["mcp_servers"]:
@@ -125,6 +129,17 @@ def remove_server(name: str, target: str = "user") -> list[str]:
                         f"({', '.join(conflicts)}). Remove {name!r} from those scopes first."
                     )
 
+    global_data = data if target == "user" else (sibling_data or {})
+    repo_data = sibling_data if target == "user" else data
+    if repo_data is not None and resolve_mode(global_data, repo_data) == MODE_GLOBAL:
+        repo_data = None
+    known_scopes: dict[str, Any] = {}
+    for document in (global_data, repo_data):
+        document_scopes = document.get("scopes") if document else None
+        if isinstance(document_scopes, dict):
+            known_scopes.update(document_scopes)
+    active_scope = resolve_saved_scope(global_data, repo_data, known_scopes)
+
     del servers[name]
 
     affected: list[str] = []
@@ -136,7 +151,7 @@ def remove_server(name: str, target: str = "user") -> list[str]:
                 continue
             del entries[name]
             affected.append(scope_name)
-            if not entries:
+            if not entries and scope_name != active_scope:
                 del scopes[scope_name]
         if not scopes:
             data.pop("scopes", None)
