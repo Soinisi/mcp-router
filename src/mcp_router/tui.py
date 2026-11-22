@@ -124,8 +124,12 @@ class ScopeTui(App[None]):
     Screen { layout: vertical; }
     #toolbar { height: auto; padding: 0 1; }
     #selection { height: auto; padding: 0 1; }
+    #selection Horizontal { height: auto; }
     #selection Select { width: 32; }
-    #mode { width: auto; height: auto; }
+    #selection Label { width: 15; }
+    #mode { width: auto; height: auto; layout: horizontal; }
+    #mode RadioButton { width: auto; }
+    #actions { height: auto; }
     #status { height: auto; padding: 0 1; color: $text-muted; }
     #servers { height: 1fr; }
     .modal { width: 64; height: auto; padding: 1 2; background: $panel; border: thick $accent; }
@@ -172,33 +176,36 @@ class ScopeTui(App[None]):
     def compose(self) -> ComposeResult:
         yield Header()
         with Vertical(id="toolbar"):
-            with Horizontal(id="selection"):
-                yield Label("Mode: ")
-                with RadioSet(id="mode"):
-                    yield RadioButton(
-                        "global",
-                        id="mode-global",
-                        value=self.editor.mode == MODE_GLOBAL,
+            with Vertical(id="selection"):
+                with Horizontal():
+                    yield Label("Mode: ")
+                    with RadioSet(id="mode"):
+                        yield RadioButton(
+                            "global",
+                            id="mode-global",
+                            value=self.editor.mode == MODE_GLOBAL,
+                        )
+                        yield RadioButton(
+                            "local-repo",
+                            id="mode-local",
+                            value=self.editor.mode == MODE_LOCAL_REPO,
+                        )
+                with Horizontal():
+                    yield Label("Edit scope: ")
+                    yield Select(
+                        self._edit_scope_options(),
+                        id="edit-scope",
+                        allow_blank=False,
+                        value=self._edit_scope_value(),
                     )
-                    yield RadioButton(
-                        "local-repo",
-                        id="mode-local",
-                        value=self.editor.mode == MODE_LOCAL_REPO,
+                with Horizontal():
+                    yield Label("Active scope: ")
+                    yield Select(
+                        self._active_scope_options(),
+                        id="active-scope",
+                        allow_blank=False,
+                        value=self._active_scope_value(),
                     )
-                yield Label("  Edit scope: ")
-                yield Select(
-                    self._edit_scope_options(),
-                    id="edit-scope",
-                    allow_blank=False,
-                    value=self._edit_scope_value(),
-                )
-                yield Label("  Active scope: ")
-                yield Select(
-                    self._active_scope_options(),
-                    id="active-scope",
-                    allow_blank=False,
-                    value=self._active_scope_value(),
-                )
             with Horizontal(id="actions"):
                 yield Button("Save", id="save", variant="primary")
                 yield Button("New scope", id="new-scope")

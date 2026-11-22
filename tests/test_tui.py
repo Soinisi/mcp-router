@@ -8,7 +8,15 @@ import sys
 from pathlib import Path
 
 import yaml
-from textual.widgets import Input, RadioButton, Select, Static, Tree
+import pytest
+from textual.widgets import (
+    Input,
+    OptionList,
+    RadioButton,
+    Select,
+    Static,
+    Tree,
+)
 
 from mcp_router.config import write_raw_config
 from mcp_router.scope_edit import ScopeEditor
@@ -376,6 +384,55 @@ def test_reverting_an_override_restores_the_inherited_null_tool_baseline(
     assert entry["tools"] is None
     assert entry["resources"] == ["global://docs"]
     assert entry["prompts"] == ["global-prompt"]
+
+
+@pytest.mark.parametrize("size", [(80, 24), (100, 30)])
+async def test_tui_selection_controls_fit_and_active_scope_dropdown_works(
+    tmp_path, monkeypatch, size
+):
+    config = tmp_path / "config.yaml"
+    raw = _config()
+    raw["scopes"]["work"] = {"alpha": None}
+    write_raw_config(config, raw)
+    monkeypatch.setenv("MCP_ROUTER_CONFIG", str(config))
+    monkeypatch.chdir(tmp_path)
+
+    app = ScopeTui(ScopeEditor.load([config, tmp_path / "mcp-router.yaml"]))
+    async with app.run_test(size=size) as pilot:
+        await pilot.pause()
+        width, height = app.size
+        for selector in ("#mode", "#edit-scope", "#active-scope"):
+            region = app.query_one(selector).region
+            assert region.x >= 0 and region.right <= width, selector
+            assert region.y >= 0 and region.bottom <= height, selector
+        for button in app.query_one("#mode").query(RadioButton):
+            region = button.region
+            assert region.right <= width and region.bottom <= height
+
+        # More than one registered server is visible without scrolling.
+        assert app.query_one("#servers", Tree).size.height > 1
+
+        # A human can open the Active scope list and pick a scope from it.
+        active = app.query_one("#active-scope", Select)
+        active.focus()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert active.expanded is True
+        overlay = active.query_one(OptionList)
+        assert overlay.region.width > 0 and overlay.region.height > 0
+        assert overlay.region.right <= width and overlay.region.bottom <= height
+        labels = [
+            str(overlay.get_option_at_index(index).prompt)
+            for index in range(overlay.option_count)
+        ]
+        target = labels.index("work")
+        while overlay.highlighted < target:
+            await pilot.press("down")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert active.value == "work"
+        assert app.editor.active_scope == "work"
+        assert app.dirty is True
 
 
 async def test_tui_new_scope_counts_as_unsaved(tmp_path, monkeypatch):
