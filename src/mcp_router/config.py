@@ -531,6 +531,27 @@ def resolve_launch_scope(
     return pin
 
 
+def resolve_reload_scope(
+    loaded: LoadedConfig, launch_scope: str | None = None
+) -> tuple[str | None, str | None]:
+    """The active scope for a reload, where a saved change outranks the pin.
+
+    A stale launch pin must not defeat a selection the human just saved. The
+    saved selection wins and the conflict is returned for the caller to
+    report; a pin still narrows an unrestricted saved view.
+    """
+    pin = launch_scope or os.environ.get("MCP_ROUTER_SCOPE")
+    if loaded.active_scope is not None:
+        conflict = None
+        if pin and pin != loaded.active_scope:
+            conflict = (
+                f"Launch scope {pin!r} conflicts with the saved active scope "
+                f"{loaded.active_scope!r}; applying the saved selection."
+            )
+        return loaded.active_scope, conflict
+    return pin, None
+
+
 def scope_uses_categories(scopes: Any) -> bool:
     """True when a scope entry needs the v2 per-category mapping shape.
 

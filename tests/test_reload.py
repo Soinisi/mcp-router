@@ -35,11 +35,16 @@ def _config(*, servers=("alpha", "beta"), scope_servers=("alpha",)):
     }
 
 
-def _params(config: Path, cwd: Path | None = None) -> StdioServerParameters:
+def _params(
+    config: Path, cwd: Path | None = None, scope: str | None = None
+) -> StdioServerParameters:
+    env = {**os.environ, "MCP_ROUTER_CONFIG": str(config)}
+    if scope is not None:
+        env["MCP_ROUTER_SCOPE"] = scope
     return StdioServerParameters(
         command=sys.executable,
         args=["-m", "mcp_router.server"],
-        env={**os.environ, "MCP_ROUTER_CONFIG": str(config)},
+        env=env,
         cwd=str(cwd) if cwd is not None else None,
     )
 
@@ -141,4 +146,21 @@ async def test_invalid_config_keeps_last_good_and_recovers(tmp_path):
 
             # The watcher survives and adopts the next valid document.
             write_raw_config(config, _config(scope_servers=("beta",)))
+            assert await _wait_for_names(session, {"beta"}) == {"beta"}
+
+
+async def test_reload_applies_the_saved_scope_over_a_stale_launch_pin(tmp_path):
+    config = tmp_path / "config.yaml"
+    raw = _config()
+    raw["active_scope"] = "default"
+    raw["scopes"]["beta-only"] = {"beta": None}
+    write_raw_config(config, raw)
+
+    async with stdio_client(_params(config, scope="default")) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            assert await _wait_for_names(session, {"alpha"}) == {"alpha"}
+
+            raw["active_scope"] = "beta-only"
+            write_raw_config(config, raw)
             assert await _wait_for_names(session, {"beta"}) == {"beta"}

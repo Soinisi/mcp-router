@@ -8,11 +8,11 @@ import sys
 from pathlib import Path
 
 import yaml
-from textual.widgets import RadioButton, Select, Static, Tree
+from textual.widgets import Input, RadioButton, Select, Static, Tree
 
 from mcp_router.config import write_raw_config
 from mcp_router.scope_edit import ScopeEditor
-from mcp_router.tui import ConfirmScreen, ScopeTui
+from mcp_router.tui import ConfirmScreen, PromptScreen, ScopeTui
 
 CHILD = Path(__file__).with_name("child_server.py")
 
@@ -159,3 +159,129 @@ async def test_tui_save_writes_the_tick_list(tmp_path, monkeypatch):
     raw = yaml.safe_load(config.read_text(encoding="utf-8"))
     assert "beta" in raw["scopes"]["default"]
     assert raw["mcp_servers"] == _config()["mcp_servers"]
+
+
+def test_ticking_every_visible_tool_keeps_an_explicit_allowlist(tmp_path):
+    config = tmp_path / "config.yaml"
+    raw = _config()
+    raw["scopes"]["default"] = {"alpha": ["echo"]}
+    write_raw_config(config, raw)
+
+    editor = ScopeEditor.load([config, tmp_path / "mcp-router.yaml"])
+    app = ScopeTui(editor)
+    app._available_tools = {"alpha": ["add", "echo"]}
+
+    assert app._toggle_tool("alpha", "add") is True
+    entry = editor.target_doc()["scopes"]["default"]["alpha"]
+    assert entry["tools"] == ["add", "echo"]
+
+
+async def test_tui_new_scope_counts_as_unsaved(tmp_path, monkeypatch):
+    config = tmp_path / "config.yaml"
+    write_raw_config(config, _config())
+    monkeypatch.setenv("MCP_ROUTER_CONFIG", str(config))
+    monkeypatch.chdir(tmp_path)
+
+    app = ScopeTui(ScopeEditor.load([config, tmp_path / "mcp-router.yaml"]))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.action_new_scope()
+        await pilot.pause()
+        assert isinstance(app.screen, PromptScreen)
+        app.screen.query_one("#prompt-input", Input).value = "work"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "work" in app.editor.scope_names()
+        assert app.dirty is True
+
+        app.action_quit()
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmScreen)
+        await pilot.click("#confirm-yes")
+
+    assert "work" not in app.editor.scope_names()
+
+
+async def test_tui_duplicate_scope_counts_as_unsaved(tmp_path, monkeypatch):
+    config = tmp_path / "config.yaml"
+    write_raw_config(config, _config())
+    monkeypatch.setenv("MCP_ROUTER_CONFIG", str(config))
+    monkeypatch.chdir(tmp_path)
+
+    app = ScopeTui(ScopeEditor.load([config, tmp_path / "mcp-router.yaml"]))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.action_duplicate_scope()
+        await pilot.pause()
+        assert isinstance(app.screen, PromptScreen)
+        app.screen.query_one("#prompt-input", Input).value = "copy"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "copy" in app.editor.scope_names()
+        assert app.dirty is True
+
+        app.action_quit()
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmScreen)
+        await pilot.click("#confirm-yes")
+
+    assert "copy" not in app.editor.scope_names()
+
+
+async def test_tui_delete_scope_counts_as_unsaved(tmp_path, monkeypatch):
+    config = tmp_path / "config.yaml"
+    raw = _config()
+    raw["scopes"]["work"] = {"alpha": None}
+    write_raw_config(config, raw)
+    monkeypatch.setenv("MCP_ROUTER_CONFIG", str(config))
+    monkeypatch.chdir(tmp_path)
+
+    app = ScopeTui(ScopeEditor.load([config, tmp_path / "mcp-router.yaml"]))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.editor.edited_scope = "work"
+        app.action_delete_scope()
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmScreen)
+        await pilot.click("#confirm-yes")
+        await pilot.pause()
+        assert "work" not in app.editor.scope_names()
+        assert app.dirty is True
+
+        app.action_quit()
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmScreen)
+        await pilot.click("#confirm-yes")
+
+    assert "work" in app.editor.scope_names()
+
+
+async def test_edit_scope_select_resyncs_after_discard_and_navigate(
+    tmp_path, monkeypatch
+):
+    config = tmp_path / "config.yaml"
+    raw = _config()
+    raw["scopes"]["work"] = {"alpha": None}
+    write_raw_config(config, raw)
+    monkeypatch.setenv("MCP_ROUTER_CONFIG", str(config))
+    monkeypatch.chdir(tmp_path)
+
+    app = ScopeTui(ScopeEditor.load([config, tmp_path / "mcp-router.yaml"]))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        tree = app.query_one("#servers", Tree)
+        tree.move_cursor(tree.root.children[0])
+        await pilot.pause()
+        await pilot.press("space")
+        await pilot.pause()
+        assert app.dirty is True
+
+        selection = app.query_one("#edit-scope", Select)
+        selection.value = "work"
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmScreen)
+        await pilot.click("#confirm-yes")
+        await pilot.pause()
+
+        assert app.editor.edited_scope == "work"
+        assert selection.value == "work"

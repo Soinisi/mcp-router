@@ -333,14 +333,35 @@ def test_new_scope_is_empty_and_cannot_delete_active(tmp_path):
         editor.delete_scope("work")
 
 
-def test_restore_scope_discards_pending_ticks(configs):
+def test_discard_drops_pending_ticks(configs):
     global_cfg, repo_cfg = configs
     editor = ScopeEditor.load([global_cfg, repo_cfg])
     original = copy.deepcopy(editor.global_doc["scopes"]["default"])
     editor.remove_server_entry("default", "tickets")
     assert "tickets" not in editor.global_doc["scopes"]["default"]
-    editor.restore_scope("default")
+    editor.discard()
     assert editor.global_doc["scopes"]["default"] == original
+
+
+def test_discard_restores_structural_scope_changes(tmp_path):
+    global_cfg = tmp_path / "config.yaml"
+    repo_cfg = tmp_path / "mcp-router.yaml"
+    _write(
+        global_cfg,
+        {
+            "version": 1,
+            "mcp_servers": {},
+            "scopes": {"default": {}, "work": {}},
+        },
+    )
+    editor = ScopeEditor.load([global_cfg, repo_cfg])
+    editor.new_scope("temporary")
+    editor.duplicate_scope("default", "copy")
+    editor.delete_scope("work")
+
+    editor.discard()
+
+    assert editor.scope_names() == ["default", "work"]
 
 
 def test_duplicate_scope_copies_entries(tmp_path):

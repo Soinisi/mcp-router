@@ -28,6 +28,9 @@ The config file is the only channel.
   cached sessions, rebuilds the tool surface and notifies.
 - An invalid document keeps the last good configuration and is reported on
   stderr. It never crashes the server and never falls back to unrestricted.
+- On reload the saved selection is authoritative. A stale launch pin that names
+  a different scope is reported on stderr and does not defeat the selection the
+  human just saved.
 - The server advertises `listChanged` through `NotificationOptions` and sends
   `notifications/tools/list_changed` after a successful reload. The lifespan
   runs before a client session exists, so the session is captured from the first
@@ -45,7 +48,7 @@ The config file is the only channel.
 
 - Live changes are eventual: the poll interval plus debounce bounds how long a
   save takes to reach a running router. The editor cannot know whether a router
-  is running from that directory; it can only warn best-effort.
+  is running from that directory; it reports only where it saved.
 - An invalid save leaves the running router on the previous generation. The
   human sees the editor's validation, but a hand-edited file is reported only on
   the router's stderr.

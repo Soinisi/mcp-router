@@ -35,7 +35,9 @@ names for the same scope, preserving the merge rule above. A repo-level
 
 The saved selection is authoritative: a launch-time `MCP_ROUTER_SCOPE` /
 `serve --scope` may repeat it, or narrow an unrestricted saved view, but a
-different scope is refused rather than silently widening the agent's view.
+different scope is refused rather than silently widening the agent's view. A
+reload applies the saved selection even when a stale pin names another scope,
+and reports the conflict on stderr.
 Changing the selection is a human action in the terminal editor; there is no
 CLI verb or MCP tool for it (ADR 0001 forbids mutation tools). See ADR 0004 for
 the config-as-channel reload and its honest limit.

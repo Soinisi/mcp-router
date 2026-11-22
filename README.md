@@ -228,10 +228,11 @@ declaration without rewriting the repo's servers or scopes.
 The saved selection is authoritative. `MCP_ROUTER_SCOPE` (or
 `mcp-router serve --scope`) may repeat the saved active scope, or pin a scope
 when the saved view is unrestricted (which narrows it). A launch pin that names
-a different scope than the saved selection is refused with an explanatory
-error instead of silently widening the view. There is deliberately no CLI verb
-for changing the saved selection: only the terminal UI can do that, so an agent
-cannot easily widen its own view.
+a different scope than the saved selection is refused at startup with an
+explanatory error instead of silently widening the view. On a live reload a
+saved selection change wins over a stale pin, and the conflict is reported on
+stderr. There is deliberately no CLI verb for changing the saved selection:
+only the terminal UI can do that, so an agent cannot easily widen its own view.
 
 A scope is a guardrail selected by a human, not an authentication boundary.
 
@@ -263,10 +264,9 @@ whose secret cannot be resolved) shows "cannot enumerate" and is still
 toggleable at server level. A save that hides every server asks for confirmation
 first.
 
-The status line shows the resolved repo config path and warns, best-effort, when
-no running router appears to work from that directory. That check never blocks a
-save. The message says **saved**: the file is the only channel, and nothing
-acknowledges the write back to the editor.
+The status line shows the resolved repo config path. The message says **saved**:
+the file is the only channel, and nothing acknowledges the write back to the
+editor.
 
 ### Live reload
 

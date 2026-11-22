@@ -11,8 +11,6 @@ import it unless stdin and stdout are a real terminal.
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
 from typing import Any
 
 from rich.text import Text
@@ -107,36 +105,6 @@ class PromptScreen(ModalScreen[str | None]):
 # ---------------------------------------------------------------------------
 
 
-def _router_process_directories() -> set[Path] | None:
-    """Best-effort set of directories where a router process appears to run.
-
-    Returns ``None`` when the platform gives us no way to look, so the caller
-    stays quiet rather than warning on a false negative.
-    """
-    proc = Path("/proc")
-    if not proc.is_dir():
-        return None
-    directories: set[Path] = set()
-    for entry in proc.iterdir():
-        if not entry.name.isdigit() or int(entry.name) == os.getpid():
-            continue
-        try:
-            command = (entry / "cmdline").read_bytes().replace(b"\0", b" ").decode(
-                "utf-8", "replace"
-            )
-            looks_like_router = (
-                "mcp_router.server" in command
-                or "mcp-router-server" in command
-                or ("mcp-router" in command and "serve" in command)
-            )
-            if not looks_like_router:
-                continue
-            directories.add(Path(os.readlink(entry / "cwd")))
-        except OSError:
-            continue
-    return directories
-
-
 class ScopeTree(Tree):
     """The tick list. Space ticks the cursor row instead of expanding it."""
 
@@ -186,7 +154,6 @@ class ScopeTui(App[None]):
         self._enumeration_errors: dict[str, str] = {}
         self._manager: SessionManager | None = None
         self._status_message = ""
-        self._warned_router = False
 
     @property
     def dirty(self) -> bool:
@@ -248,8 +215,6 @@ class ScopeTui(App[None]):
         self._rebuild_tree()
         self._update_status()
         self.run_worker(self._enumerate_tools(), exclusive=True, thread=False)
-        if not self._warned_router:
-            self._check_router_running()
 
     # -- selection widgets ----------------------------------------------
 
@@ -310,7 +275,7 @@ class ScopeTui(App[None]):
 
         def decided(confirmed: bool | None) -> None:
             if confirmed:
-                self.editor.restore_scope(self.editor.edited_scope)
+                self.editor.discard()
                 self.editor.mode = self._saved_mode
                 self.editor.active_scope = self._saved_active_scope
                 scopes = self.editor.scope_names()
@@ -386,6 +351,7 @@ class ScopeTui(App[None]):
 
         def apply() -> None:
             self.editor.edited_scope = name
+            self._sync_selection_widgets()
             self._rebuild_tree()
             self._update_status()
 
@@ -557,8 +523,9 @@ class ScopeTui(App[None]):
             selected.remove(tool)
         else:
             selected.add(tool)
-        # All ticked writes null so tools added later stay visible.
-        tools = None if selected >= set(available) else sorted(selected)
+        # An explicit allow-list stays explicit even when every visible tool is
+        # ticked; toggling a tool never widens the entry to "all tools".
+        tools = sorted(selected)
         # An inherited row's base entry is the global one; creating an override
         # from it preserves that entry's resource/prompt allow-lists.
         entry = self.editor.make_target_entry(tools, row.entry)
@@ -643,7 +610,7 @@ class ScopeTui(App[None]):
                 self._status_message = str(exc)
                 self._update_status()
                 return
-            self.dirty = False
+            self.dirty = True
             self._sync_selection_widgets()
             self._rebuild_tree()
             self._status_message = (
@@ -668,7 +635,7 @@ class ScopeTui(App[None]):
                 self._status_message = str(exc)
                 self._update_status()
                 return
-            self.dirty = False
+            self.dirty = True
             self._sync_selection_widgets()
             self._rebuild_tree()
             self._status_message = f"duplicated {source!r} as {name!r}"
@@ -693,7 +660,7 @@ class ScopeTui(App[None]):
                 self._status_message = str(exc)
                 self._update_status()
                 return
-            self.dirty = False
+            self.dirty = True
             self._sync_selection_widgets()
             self._rebuild_tree()
             self._status_message = f"deleted scope {name!r}"
@@ -742,19 +709,6 @@ class ScopeTui(App[None]):
             if self._manager is manager:
                 self._manager = None
         self._rebuild_tree()
-        self._update_status()
-
-    def _check_router_running(self) -> None:
-        directories = _router_process_directories()
-        if directories is None:
-            return
-        repo = self.editor.repo_path.parent.resolve()
-        if repo not in {directory.resolve() for directory in directories}:
-            self._warned_router = True
-            self._status_message += (
-                f"  note: no running router appears to work from {repo}; "
-                "saved changes reach a router started there."
-            )
         self._update_status()
 
     def _update_status(self) -> None:

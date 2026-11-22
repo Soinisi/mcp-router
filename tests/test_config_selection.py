@@ -15,6 +15,7 @@ from mcp_router.config import (
     parse_config,
     resolve_launch_scope,
     resolve_mode,
+    resolve_reload_scope,
     resolve_saved_scope,
 )
 
@@ -267,6 +268,21 @@ def test_launch_pin_must_not_differ_from_saved_selection(tmp_path):
 def test_launch_pin_narrows_an_unrestricted_saved_view():
     saved = type("Loaded", (), {"active_scope": None})()
     assert resolve_launch_scope(saved, "narrow") == "narrow"
+
+
+def test_reload_prefers_the_saved_scope_over_a_stale_pin():
+    saved = type("Loaded", (), {"active_scope": "default"})()
+    active, conflict = resolve_reload_scope(saved, "wider")
+    assert active == "default"
+    assert conflict is not None and "conflicts" in conflict
+
+    active, conflict = resolve_reload_scope(saved, "default")
+    assert (active, conflict) == ("default", None)
+
+
+def test_reload_keeps_a_pin_that_narrows_an_unrestricted_view():
+    saved = type("Loaded", (), {"active_scope": None})()
+    assert resolve_reload_scope(saved, "narrow") == ("narrow", None)
 
 
 def test_dump_config_carries_v3_selection():

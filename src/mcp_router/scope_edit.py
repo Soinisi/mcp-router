@@ -370,22 +370,13 @@ class ScopeEditor:
             raise ConfigError(f"scope {scope_name!r} must be a mapping.")
         entries[server] = entry
 
-    def restore_scope(self, scope_name: str) -> None:
-        """Throw away in-memory edits to one scope (navigation guard)."""
-        original = self._originals.get(self.target_path(), {})
-        original_scopes = _mapping(original.get("scopes"))
-        scopes = self.target_doc().get("scopes")
-        if not isinstance(scopes, dict):
-            if scope_name not in original_scopes:
-                return
-            scopes = {}
-            self.target_doc()["scopes"] = scopes
-        if scope_name in original_scopes:
-            scopes[scope_name] = copy.deepcopy(original_scopes[scope_name])
-        else:
-            scopes.pop(scope_name, None)
-        if not scopes:
-            self.target_doc().pop("scopes", None)
+    def discard(self) -> None:
+        """Throw away every in-memory edit, restoring both raw documents."""
+        self.global_doc = copy.deepcopy(
+            self._originals.get(self.global_path, {})
+        )
+        self.repo_doc = copy.deepcopy(self._originals.get(self.repo_path, {}))
+        self.repo_exists = self.repo_path.is_file()
 
     def remove_server_entry(self, scope_name: str, server: str) -> None:
         """Remove one server entry (used by unticking / revert-to-inherited).

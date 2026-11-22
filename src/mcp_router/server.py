@@ -26,6 +26,7 @@ from .config import (
     ScopeEntry,
     load_config,
     resolve_launch_scope,
+    resolve_reload_scope,
 )
 from .registry import server_summaries
 from .sessions import DEFAULT_TIMEOUT, ServerSession, SessionManager
@@ -711,7 +712,9 @@ async def _reload_config(server: Server) -> bool:
             raise ConfigError(
                 "No router config found; keeping the last good configuration."
             )
-        active = resolve_launch_scope(loaded, _scope_name)
+        active, pin_conflict = resolve_reload_scope(loaded, _scope_name)
+        if pin_conflict is not None:
+            print(f"mcp-router: {pin_conflict}", file=sys.stderr)
         scope = loaded.config.resolve_scope(active)
     except ConfigError as exc:
         print(
