@@ -164,6 +164,8 @@ class ScopeEditor:
     edited_scope: str = DEFAULT_SCOPE
     active_scope: str | None = None
     _originals: dict[Path, dict[str, Any]] = field(default_factory=dict, repr=False)
+    #: Servers whose repo override was reverted to the global entry this session.
+    _reverted: set[tuple[str, str]] = field(default_factory=set, repr=False)
 
     @classmethod
     def load(cls, paths: list[Path] | None = None) -> "ScopeEditor":
@@ -338,10 +340,33 @@ class ScopeEditor:
             return _ABSENT
         return copy.deepcopy(global_entries[server])
 
+    def entry_basis(self, scope_name: str, server: str) -> Any:
+        """The entry a tool edit starts from; ``_ABSENT`` when there is none.
+
+        The current effective entry wins so an in-session revert is honoured;
+        only a server the scope no longer names falls back to its committed
+        entry, keeping re-enabled entries intact.
+        """
+        if (scope_name, server) in self._reverted:
+            inherited = scope_entries(self.global_doc, scope_name)
+            if server in inherited:
+                return copy.deepcopy(inherited[server])
+        entries = self.effective_entries(scope_name)
+        if server in entries:
+            return entries[server]
+        return self.committed_entry(scope_name, server)
+
     def baseline_is_null(self, scope_name: str, server: str) -> bool:
-        """Whether the committed entry for ``server`` meant "all tools"."""
-        entry = self.committed_entry(scope_name, server)
-        return entry is not _ABSENT and entry_tools(entry) is None
+        """Whether ``server``'s tool selection started as "all tools"."""
+        if (scope_name, server) in self._reverted:
+            inherited = scope_entries(self.global_doc, scope_name)
+            if server in inherited:
+                return entry_tools(inherited[server]) is None
+        entry = self.entry_basis(scope_name, server)
+        if entry is not _ABSENT and entry_tools(entry) is None:
+            return True
+        committed = self.committed_entry(scope_name, server)
+        return committed is not _ABSENT and entry_tools(committed) is None
 
     def enabled_entry(self, scope_name: str, server: str) -> Any:
         """The entry to write when turning ``server`` on in a scope."""
@@ -353,8 +378,8 @@ class ScopeEditor:
     def entry_for(
         self, scope_name: str, server: str, tools: list[str] | None
     ) -> Any:
-        """Build an entry for ``server`` from its committed non-tool data."""
-        entry = self.committed_entry(scope_name, server)
+        """Build an entry for ``server`` from its current effective data."""
+        entry = self.entry_basis(scope_name, server)
         return self.make_target_entry(
             tools, None if entry is _ABSENT else entry
         )
@@ -396,6 +421,7 @@ class ScopeEditor:
                 f"Scope {name!r} is not defined in {self.target_path()}."
             )
         del scopes[name]
+        self._reverted = {key for key in self._reverted if key[0] != name}
         if not scopes:
             self.target_doc().pop("scopes", None)
         if self.edited_scope == name:
@@ -420,6 +446,7 @@ class ScopeEditor:
         )
         self.repo_doc = copy.deepcopy(self._originals.get(self.repo_path, {}))
         self.repo_exists = self.repo_path.is_file()
+        self._reverted.clear()
 
     def remove_server_entry(self, scope_name: str, server: str) -> None:
         """Remove one server entry (used by unticking / revert-to-inherited).
@@ -435,7 +462,14 @@ class ScopeEditor:
         entries = scopes.get(scope_name)
         if not isinstance(entries, dict):
             return
+        removed_override = server in entries
         entries.pop(server, None)
+        if (
+            removed_override
+            and self.target_is_repo()
+            and server in scope_entries(self.global_doc, scope_name)
+        ):
+            self._reverted.add((scope_name, server))
         if (
             not entries
             and self.target_is_repo()
@@ -460,6 +494,7 @@ class ScopeEditor:
         if mode not in (MODE_GLOBAL, MODE_LOCAL_REPO):
             raise ConfigError(f"Unknown mode {mode!r}.")
         self.mode = mode
+        self._reverted.clear()
 
     def set_active_scope(self, name: str | None) -> None:
         if name is not None and name not in self.scope_names():
@@ -532,6 +567,7 @@ class ScopeEditor:
             write_raw_config(path, doc)
             self._originals[path] = copy.deepcopy(doc)
             written.append(path)
+        self._reverted.clear()
         return written
 
     # -- read-only helpers for the view ---------------------------------

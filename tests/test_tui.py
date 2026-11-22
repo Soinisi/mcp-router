@@ -264,6 +264,120 @@ def test_ticking_a_tool_on_an_unticked_server_keeps_its_allowlists(tmp_path):
     }
 
 
+def test_reverting_an_override_preserves_inherited_allowlists_on_a_tool_tick(
+    tmp_path,
+):
+    config = tmp_path / "config.yaml"
+    repo = tmp_path / "mcp-router.yaml"
+    write_raw_config(
+        config,
+        {
+            "version": 2,
+            "mcp_servers": {
+                "alpha": {
+                    "type": "local",
+                    "command": sys.executable,
+                    "args": [str(CHILD)],
+                }
+            },
+            "scopes": {
+                "default": {
+                    "alpha": {
+                        "tools": None,
+                        "resources": ["global://docs"],
+                        "prompts": ["global-prompt"],
+                    }
+                }
+            },
+        },
+    )
+    write_raw_config(
+        repo,
+        {
+            "version": 2,
+            "mode": "local-repo",
+            "scopes": {
+                "default": {
+                    "alpha": {
+                        "tools": ["add"],
+                        "resources": ["repo://docs"],
+                        "prompts": ["repo-prompt"],
+                    }
+                }
+            },
+        },
+    )
+
+    editor = ScopeEditor.load([config, repo])
+    app = ScopeTui(editor)
+    app._available_tools = {"alpha": ["add", "echo"]}
+
+    assert app._toggle_server("alpha") is True
+    rows = {row.name: row for row in editor.rows()}
+    assert rows["alpha"].state == "inherited"
+
+    assert app._toggle_tool("alpha", "echo") is True
+    assert editor.target_doc()["scopes"]["default"]["alpha"] == {
+        "tools": ["add"],
+        "resources": ["global://docs"],
+        "prompts": ["global-prompt"],
+    }
+
+
+def test_reverting_an_override_restores_the_inherited_null_tool_baseline(
+    tmp_path,
+):
+    config = tmp_path / "config.yaml"
+    repo = tmp_path / "mcp-router.yaml"
+    write_raw_config(
+        config,
+        {
+            "version": 2,
+            "mcp_servers": {
+                "alpha": {
+                    "type": "local",
+                    "command": sys.executable,
+                    "args": [str(CHILD)],
+                }
+            },
+            "scopes": {
+                "default": {
+                    "alpha": {
+                        "tools": None,
+                        "resources": ["global://docs"],
+                        "prompts": ["global-prompt"],
+                    }
+                }
+            },
+        },
+    )
+    write_raw_config(
+        repo,
+        {
+            "version": 2,
+            "mode": "local-repo",
+            "scopes": {"default": {"alpha": {"tools": ["add"]}}},
+        },
+    )
+
+    editor = ScopeEditor.load([config, repo])
+    app = ScopeTui(editor)
+    app._available_tools = {"alpha": ["add", "echo"]}
+    assert editor.baseline_is_null("default", "alpha") is False
+
+    assert app._toggle_server("alpha") is True
+    assert editor.baseline_is_null("default", "alpha") is True
+
+    assert app._toggle_tool("alpha", "echo") is True
+    assert editor.target_doc()["scopes"]["default"]["alpha"]["tools"] == ["add"]
+
+    assert app._toggle_tool("alpha", "echo") is True
+    entry = editor.target_doc()["scopes"]["default"]["alpha"]
+    assert entry["tools"] is None
+    assert entry["resources"] == ["global://docs"]
+    assert entry["prompts"] == ["global-prompt"]
+
+
 async def test_tui_new_scope_counts_as_unsaved(tmp_path, monkeypatch):
     config = tmp_path / "config.yaml"
     write_raw_config(config, _config())
