@@ -484,8 +484,9 @@ class ScopeTui(App[None]):
             if row.ticked:
                 self.editor.remove_server_entry(scope, name)
             else:
-                entry = self.editor.make_target_entry(None, row.entry)
-                self.editor.set_server_entry(scope, name, entry)
+                self.editor.set_server_entry(
+                    scope, name, self.editor.enabled_entry(scope, name)
+                )
             return True
 
         if row.state == "inherited":
@@ -499,7 +500,7 @@ class ScopeTui(App[None]):
             self.editor.remove_server_entry(scope, name)
             self._status_message = f"{name} reverted to inherited."
             return True
-        entry = self.editor.make_target_entry(None, row.entry)
+        entry = self.editor.enabled_entry(scope, name)
         self.editor.set_server_entry(scope, name, entry)
         return True
 
@@ -533,9 +534,11 @@ class ScopeTui(App[None]):
             tools = None
         else:
             tools = sorted(selected)
-        # An inherited row's base entry is the global one; creating an override
-        # from it preserves that entry's resource/prompt allow-lists.
-        entry = self.editor.make_target_entry(tools, row.entry)
+        # The committed entry supplies the resource/prompt allow-lists when the
+        # server is being turned back on; a brand-new entry starts empty.
+        entry = self.editor.entry_for(
+            self.editor.edited_scope, server, tools
+        )
         self.editor.set_server_entry(self.editor.edited_scope, server, entry)
         return True
 

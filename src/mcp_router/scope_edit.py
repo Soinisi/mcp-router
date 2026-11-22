@@ -31,6 +31,8 @@ from .config import (
 
 RowState = Literal["absent", "inherited", "overridden", "present"]
 
+_ABSENT: Any = object()
+
 
 def _mapping(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
@@ -316,21 +318,46 @@ class ScopeEditor:
             )
         return entries
 
+    def committed_entry(self, scope_name: str, server: str) -> Any:
+        """The last committed entry for ``server``; ``_ABSENT`` when none.
+
+        Local mode prefers a repo override and falls back to the global entry,
+        mirroring the merge the router applies; global mode reads the global
+        document only.
+        """
+        if self.mode != MODE_GLOBAL:
+            repo_entries = scope_entries(
+                self._originals.get(self.repo_path, {}), scope_name
+            )
+            if server in repo_entries:
+                return copy.deepcopy(repo_entries[server])
+        global_entries = scope_entries(
+            self._originals.get(self.global_path, {}), scope_name
+        )
+        if server not in global_entries:
+            return _ABSENT
+        return copy.deepcopy(global_entries[server])
+
     def baseline_is_null(self, scope_name: str, server: str) -> bool:
         """Whether the committed entry for ``server`` meant "all tools"."""
-        repo_entries = scope_entries(
-            self._originals.get(self.repo_path, {}), scope_name
+        entry = self.committed_entry(scope_name, server)
+        return entry is not _ABSENT and entry_tools(entry) is None
+
+    def enabled_entry(self, scope_name: str, server: str) -> Any:
+        """The entry to write when turning ``server`` on in a scope."""
+        entry = self.committed_entry(scope_name, server)
+        if entry is _ABSENT:
+            return self.make_target_entry(None, None)
+        return entry
+
+    def entry_for(
+        self, scope_name: str, server: str, tools: list[str] | None
+    ) -> Any:
+        """Build an entry for ``server`` from its committed non-tool data."""
+        entry = self.committed_entry(scope_name, server)
+        return self.make_target_entry(
+            tools, None if entry is _ABSENT else entry
         )
-        if self.mode != MODE_GLOBAL and server in repo_entries:
-            entry = repo_entries[server]
-        else:
-            global_entries = scope_entries(
-                self._originals.get(self.global_path, {}), scope_name
-            )
-            if server not in global_entries:
-                return False
-            entry = global_entries[server]
-        return entry_tools(entry) is None
 
     def new_scope(self, name: str) -> None:
         name = name.strip()

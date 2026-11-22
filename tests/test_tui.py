@@ -210,6 +210,60 @@ def test_enabling_an_absent_server_writes_an_explicit_allowlist(tmp_path):
     assert entry["tools"] == ["add"]
 
 
+def test_unticking_and_reticking_a_server_restores_its_committed_entry(
+    tmp_path,
+):
+    config = tmp_path / "config.yaml"
+    raw = _config()
+    raw["scopes"]["default"] = {
+        "alpha": {
+            "tools": ["add"],
+            "resources": ["alpha://docs"],
+            "prompts": ["summarise"],
+        }
+    }
+    write_raw_config(config, raw)
+
+    editor = ScopeEditor.load([config, tmp_path / "mcp-router.yaml"])
+    app = ScopeTui(editor)
+    app._available_tools = {"alpha": ["add", "echo"]}
+
+    assert app._toggle_server("alpha") is True
+    assert "alpha" not in editor.target_doc()["scopes"]["default"]
+
+    assert app._toggle_server("alpha") is True
+    assert editor.target_doc()["scopes"]["default"]["alpha"] == {
+        "tools": ["add"],
+        "resources": ["alpha://docs"],
+        "prompts": ["summarise"],
+    }
+
+
+def test_ticking_a_tool_on_an_unticked_server_keeps_its_allowlists(tmp_path):
+    config = tmp_path / "config.yaml"
+    raw = _config()
+    raw["scopes"]["default"] = {
+        "alpha": {
+            "tools": ["add"],
+            "resources": ["alpha://docs"],
+            "prompts": ["summarise"],
+        }
+    }
+    write_raw_config(config, raw)
+
+    editor = ScopeEditor.load([config, tmp_path / "mcp-router.yaml"])
+    app = ScopeTui(editor)
+    app._available_tools = {"alpha": ["add", "echo"]}
+
+    assert app._toggle_server("alpha") is True
+    assert app._toggle_tool("alpha", "echo") is True
+    assert editor.target_doc()["scopes"]["default"]["alpha"] == {
+        "tools": ["echo"],
+        "resources": ["alpha://docs"],
+        "prompts": ["summarise"],
+    }
+
+
 async def test_tui_new_scope_counts_as_unsaved(tmp_path, monkeypatch):
     config = tmp_path / "config.yaml"
     write_raw_config(config, _config())
