@@ -396,6 +396,20 @@ model step while the router keeps showing only three tools, so the end-to-end
 saving grows. A broad cross-server search can grow the router's own output too;
 the 50-result cap and the compact summaries bound it.
 
+The end-to-end result is a conservative floor rather than a typical case:
+the benchmark session is deliberately minimal — one discovery round-trip and
+one tool call across two model steps — so it understates the router's benefit
+in a real session. Each further step that reuses already-found tools costs the
+direct configuration another full set of N tool catalogs (~660N tokens in the
+analytical model) while the router keeps showing only its three tools, so the
+saving compounds with session length. The figures count raw input tokens,
+which is what the agent's context window actually carries; prompt caching
+discounts an identical repeated prefix, so it narrows the billed-cost gap —
+direct's repeated catalogs are billed at a fraction after the first step —
+while the context-window saving, and therefore these numbers, stand. The
+saving also narrows when an agent searches repeatedly for new tool families,
+since each discovery round-trip is charged to the router.
+
 ### Analytical estimate
 
 The measured numbers include everything the agent actually did, so they move with
