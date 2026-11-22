@@ -524,8 +524,15 @@ class ScopeTui(App[None]):
         else:
             selected.add(tool)
         # An explicit allow-list stays explicit even when every visible tool is
-        # ticked; toggling a tool never widens the entry to "all tools".
-        tools = sorted(selected)
+        # ticked; only an entry committed as null may return to "all tools".
+        if (
+            row.ticked
+            and self.editor.baseline_is_null(self.editor.edited_scope, server)
+            and selected >= set(available)
+        ):
+            tools = None
+        else:
+            tools = sorted(selected)
         # An inherited row's base entry is the global one; creating an override
         # from it preserves that entry's resource/prompt allow-lists.
         entry = self.editor.make_target_entry(tools, row.entry)

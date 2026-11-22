@@ -316,6 +316,22 @@ class ScopeEditor:
             )
         return entries
 
+    def baseline_is_null(self, scope_name: str, server: str) -> bool:
+        """Whether the committed entry for ``server`` meant "all tools"."""
+        repo_entries = scope_entries(
+            self._originals.get(self.repo_path, {}), scope_name
+        )
+        if self.mode != MODE_GLOBAL and server in repo_entries:
+            entry = repo_entries[server]
+        else:
+            global_entries = scope_entries(
+                self._originals.get(self.global_path, {}), scope_name
+            )
+            if server not in global_entries:
+                return False
+            entry = global_entries[server]
+        return entry_tools(entry) is None
+
     def new_scope(self, name: str) -> None:
         name = name.strip()
         if not name:

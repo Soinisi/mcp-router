@@ -167,6 +167,16 @@ def test_keep_one_previous_generation(tmp_path):
     assert not list(tmp_path.glob("*.tmp"))
 
 
+def test_backup_inherits_the_config_file_permissions(tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text("version: 1\n", encoding="utf-8")
+    path.chmod(0o640)
+    atomic_write_text(path, "version: 2\n")
+
+    backup = tmp_path / "config.yaml.bak"
+    assert backup.stat().st_mode & 0o777 == 0o640
+
+
 def test_atomic_write_creates_no_partial_file_on_failure(tmp_path, monkeypatch):
     path = tmp_path / "config.yaml"
     path.write_text("version: 1\n", encoding="utf-8")

@@ -631,7 +631,7 @@ def atomic_write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     backup = path.with_name(path.name + ".bak")
     if path.is_file():
-        shutil.copyfile(path, backup)
+        shutil.copy2(path, backup)
     fd, temporary = tempfile.mkstemp(
         dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
     )

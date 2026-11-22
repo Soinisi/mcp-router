@@ -176,6 +176,40 @@ def test_ticking_every_visible_tool_keeps_an_explicit_allowlist(tmp_path):
     assert entry["tools"] == ["add", "echo"]
 
 
+def test_reticking_a_tool_on_a_null_entry_restores_all_tools(tmp_path):
+    config = tmp_path / "config.yaml"
+    raw = _config()
+    raw["scopes"]["default"] = {"alpha": None}
+    write_raw_config(config, raw)
+
+    editor = ScopeEditor.load([config, tmp_path / "mcp-router.yaml"])
+    app = ScopeTui(editor)
+    app._available_tools = {"alpha": ["add", "echo"]}
+
+    assert app._toggle_tool("alpha", "add") is True
+    entry = editor.target_doc()["scopes"]["default"]["alpha"]
+    assert entry["tools"] == ["echo"]
+
+    assert app._toggle_tool("alpha", "add") is True
+    entry = editor.target_doc()["scopes"]["default"]["alpha"]
+    assert entry["tools"] is None
+
+
+def test_enabling_an_absent_server_writes_an_explicit_allowlist(tmp_path):
+    config = tmp_path / "config.yaml"
+    raw = _config()
+    raw["scopes"]["default"] = {}
+    write_raw_config(config, raw)
+
+    editor = ScopeEditor.load([config, tmp_path / "mcp-router.yaml"])
+    app = ScopeTui(editor)
+    app._available_tools = {"alpha": ["add"]}
+
+    assert app._toggle_tool("alpha", "add") is True
+    entry = editor.target_doc()["scopes"]["default"]["alpha"]
+    assert entry["tools"] == ["add"]
+
+
 async def test_tui_new_scope_counts_as_unsaved(tmp_path, monkeypatch):
     config = tmp_path / "config.yaml"
     write_raw_config(config, _config())
