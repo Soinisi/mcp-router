@@ -1,8 +1,8 @@
 # AGENTS.md
 
-`mcp-router`: one MCP server an agent connects to, exposing 3 discovery/proxy
-tools for all other ("registered") servers behind it. See `CONTEXT.md`
-(glossary only) and `docs/adr/0001-*` (the core design decision).
+`mcp-router`: one MCP server an agent connects to, exposing a dynamic
+discovery/proxy surface for all other ("registered") servers behind it. See
+`CONTEXT.md` (glossary only) and `docs/adr/0001-*` (the core design decision).
 
 ## Commands
 
