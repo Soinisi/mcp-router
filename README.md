@@ -51,6 +51,7 @@ step.
   - [Analytical estimate](#analytical-estimate)
 - [Connecting a client](#connecting-a-client)
 - [Behaviour](#behaviour)
+- [License](#license)
 
 ## How it works
 
