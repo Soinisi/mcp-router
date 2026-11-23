@@ -505,3 +505,8 @@ Point your MCP client at the stdio server:
 
 See `CONTEXT.md` for the glossary and `docs/adr/` for the decisions behind this
 shape.
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for the
+full text.
