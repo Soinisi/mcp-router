@@ -37,8 +37,9 @@ server and reads the capabilities advertised in the initialize handshake
 (presence of `tools`, `resources`, `prompts`). It caches the union for the
 session and builds its own tool list from it:
 
-- `get_installed_mcps` is always exposed, because browsing the registered
-  servers is the entry point to everything else.
+- `get_installed_mcps` is always exposed because it is the only status and
+  reachability view and the only source of known-server metadata. It is not the
+  discovery entry point: discovery goes through the search tools.
 - The tool pair appears only when at least one scope-visible server offers
   tools; the resource pair only when one offers resources, and the prompt pair
   only when one offers prompts. Categories are gated independently: a server
