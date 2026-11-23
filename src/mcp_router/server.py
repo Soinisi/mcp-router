@@ -69,20 +69,26 @@ _INSTRUCTIONS = (
     "templates matching your filter.\n"
     "  6. get_prompt(mcp_name, name, arguments?) -> render one prompt "
     "template.\n"
-    "get_installed_mcps lists server names, descriptions and reachability; use "
-    "it only when you need that list or a reachability check."
+    "get_installed_mcps reports registered server metadata (name, type, "
+    "description) and, with check=true, their reachability; it is NOT for "
+    "discovering or searching servers or tools. Discover servers and tools "
+    "through search_tools, resources through search_resources, and prompts "
+    "through search_prompts."
 )
 
 _GET_INSTALLED_MCPS = types.Tool(
         name="get_installed_mcps",
         description=(
-            "List the MCP servers available to this connection (all registered "
-            "servers, or the active scope's subset), optionally filtered by a "
-            "regular expression over their names and descriptions. Use this to "
-            "browse server names/descriptions or, with check=true, to report "
-            "reachability and tool counts. For finding a tool, call "
-            "search_tools instead. Returns each server's name, description and "
-            "type."
+            "Report registered server metadata: each server's name, type and "
+            "description (all registered servers, or the active scope's "
+            "subset). This tool is NOT for discovering or searching MCP "
+            "servers or tools; do not use it to find servers or tools. "
+            "Discovery goes through search_tools for tools, search_resources "
+            "for resources, and search_prompts for prompts. Use "
+            "get_installed_mcps only when you actually need a reachability and "
+            "status check (check=true) or the metadata of a server you already "
+            "know. regex_filter only narrows that metadata listing; it is not "
+            "a discovery search."
         ),
         inputSchema={
             "type": "object",
@@ -90,13 +96,19 @@ _GET_INSTALLED_MCPS = types.Tool(
                 "regex_filter": {
                     "type": "string",
                     "description": (
-                        "Case-insensitive regex matched against server names and "
-                        "descriptions."
+                        "Case-insensitive regex that narrows the known-server "
+                        "metadata listing by server name or description. Not "
+                        "for discovery: use search_tools to find servers or "
+                        "tools."
                     ),
                 },
                 "check": {
                     "type": "boolean",
-                    "description": "If true, connect to each server and report reachability.",
+                    "description": (
+                        "If true, connect to each server and report "
+                        "reachability and tool counts. Use only for a status "
+                        "check, not for discovery."
+                    ),
                     "default": False,
                 },
             },
@@ -133,8 +145,9 @@ _SEARCH_TOOLS = types.Tool(
                 "mcp_name": {
                     "type": "string",
                     "description": (
-                        "A server name from get_installed_mcps. Omit to search "
-                        "all scope-visible servers."
+                        "A server name you know, or one returned by "
+                        "search_tools. Omit to search all scope-visible "
+                        "servers."
                     ),
                 },
                 "full": {
@@ -163,7 +176,7 @@ _RUN_MCP_TOOL = types.Tool(
             "properties": {
                 "mcp_name": {
                     "type": "string",
-                    "description": "A server name from get_installed_mcps or search_tools.",
+                    "description": "A server name from search_tools, or one you already know.",
                 },
                 "mcp_tool": {
                     "type": "string",
@@ -204,8 +217,8 @@ _SEARCH_RESOURCES = types.Tool(
             "mcp_name": {
                 "type": "string",
                 "description": (
-                    "A server name from get_installed_mcps. Omit to search all "
-                    "scope-visible servers."
+                    "A server name you know, or one returned by search_tools. "
+                    "Omit to search all scope-visible servers."
                 ),
             },
         },
@@ -226,7 +239,7 @@ _READ_RESOURCE = types.Tool(
         "properties": {
             "mcp_name": {
                 "type": "string",
-                "description": "A server name from get_installed_mcps or search_resources.",
+                "description": "A server name from search_resources, or one you already know.",
             },
             "uri": {
                 "type": "string",
@@ -262,8 +275,8 @@ _SEARCH_PROMPTS = types.Tool(
             "mcp_name": {
                 "type": "string",
                 "description": (
-                    "A server name from get_installed_mcps. Omit to search all "
-                    "scope-visible servers."
+                    "A server name you know, or one returned by search_tools. "
+                    "Omit to search all scope-visible servers."
                 ),
             },
         },
@@ -284,7 +297,7 @@ _GET_PROMPT = types.Tool(
         "properties": {
             "mcp_name": {
                 "type": "string",
-                "description": "A server name from get_installed_mcps or search_prompts.",
+                "description": "A server name from search_prompts, or one you already know.",
             },
             "name": {
                 "type": "string",

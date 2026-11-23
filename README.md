@@ -62,9 +62,12 @@ present, the tools pair appears when at least one scope-visible server offers
 tools, the resources pair appears when one offers resources, and the prompts
 pair appears when one offers prompts. Reach everything through those tools:
 
-1. `get_installed_mcps(regex_filter?)` — the registered servers. The filter
-   matches server names and descriptions; `check=true` also reports reachability
-   and tool counts. Use it to browse or diagnose, not as a required first step.
+1. `get_installed_mcps(regex_filter?, check?)` — status and metadata only,
+   never discovery. It reports the registered servers' names, descriptions and
+   types; `check=true` also reports reachability and tool counts. It must not be
+   used to find servers or tools: discovery goes through `search_tools`,
+   `search_resources` and `search_prompts`. `regex_filter` only narrows the
+   metadata listing of a server you already know.
 2. `search_tools(regex_filter?, mcp_name?, full?)` — find tools in one call.
    With `mcp_name`, search that server; without it, search every scope-visible
    server, matching server and tool names/descriptions and tagging each result
